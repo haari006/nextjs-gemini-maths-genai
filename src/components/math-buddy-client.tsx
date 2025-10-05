@@ -412,8 +412,8 @@ export default function MathBuddyClient() {
       case "generating":
       case "checking":
         return (
-          <div className="flex flex-col items-center justify-center rounded-[2rem] border border-dashed border-primary/30 bg-white/80 p-10 text-center shadow-lg backdrop-blur-xl">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary via-accent to-[#ffc15e] text-white shadow-xl">
+          <div className="flex flex-col items-center justify-center rounded-[2rem] border border-dashed border-primary/25 bg-white/80 p-10 text-center shadow-lg backdrop-blur-xl">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-white shadow-lg">
               <Loader2 className="h-10 w-10 animate-spin" />
             </div>
             <div className="mt-6 space-y-2">
@@ -435,16 +435,16 @@ export default function MathBuddyClient() {
       case "feedback":
         return (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-            <Card className="relative overflow-hidden rounded-[2.2rem] border-none bg-white/85 shadow-xl backdrop-blur-xl">
-              <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-primary/25 blur-3xl" />
-              <div className="pointer-events-none absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-accent/20 blur-2xl" />
-              <CardHeader className="relative z-10 space-y-4 rounded-t-[2.2rem] bg-gradient-to-br from-primary via-[#8363ff] to-accent p-8 text-primary-foreground">
+            <Card className="relative overflow-hidden rounded-[2.2rem] border border-border/60 bg-white/90 shadow-xl backdrop-blur-xl">
+              <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-primary/15 blur-3xl" />
+              <div className="pointer-events-none absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-accent/15 blur-2xl" />
+              <CardHeader className="relative z-10 space-y-4 rounded-t-[2.2rem] bg-gradient-to-br from-primary to-accent p-8 text-primary-foreground">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <Badge className="rounded-full bg-white/25 px-4 py-1 text-sm font-semibold text-white backdrop-blur-sm">
+                  <Badge className="rounded-full bg-white/85 px-4 py-1 text-sm font-semibold text-primary shadow-sm">
                     {gameState === "solving" ? "Time to solve!" : "Feedback time"}
                   </Badge>
                   {friendlyDifficulty && (
-                    <Badge className="rounded-full bg-white/25 px-3 py-1 text-sm font-semibold text-white backdrop-blur-sm">
+                    <Badge className="rounded-full bg-white/85 px-3 py-1 text-sm font-semibold text-primary shadow-sm">
                       {friendlyDifficulty} level
                     </Badge>
                   )}
@@ -459,7 +459,7 @@ export default function MathBuddyClient() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="relative z-10 space-y-6 p-8">
-                <div className="rounded-2xl border border-dashed border-primary/30 bg-white/70 p-6 text-base leading-relaxed shadow-inner backdrop-blur-sm">
+                <div className="rounded-2xl border border-dashed border-primary/20 bg-white/70 p-6 text-base leading-relaxed shadow-inner backdrop-blur-sm">
                   {problem?.problem && <MathText text={problem.problem} />}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-muted-foreground">
@@ -474,7 +474,7 @@ export default function MathBuddyClient() {
                   {friendlyTopic && (
                     <Badge
                       variant="outline"
-                      className="rounded-full border-accent/40 bg-accent/10 px-4 py-1 text-accent-foreground"
+                      className="rounded-full border-accent/40 bg-accent/10 px-4 py-1 text-accent"
                     >
                       {friendlyTopic}
                     </Badge>
@@ -486,7 +486,7 @@ export default function MathBuddyClient() {
               <Form {...answerForm}>
                 <form
                   onSubmit={answerForm.handleSubmit(handleCheckAnswer)}
-                  className="space-y-5 rounded-[2rem] border border-transparent bg-white/85 p-6 shadow-xl backdrop-blur-xl"
+                  className="space-y-5 rounded-[2rem] border border-border/60 bg-white/90 p-6 shadow-xl backdrop-blur-xl"
                 >
                   <FormField
                     control={answerForm.control}
@@ -503,7 +503,7 @@ export default function MathBuddyClient() {
                             disabled={gameState !== "solving"}
                             placeholder="Show your working or type your answer..."
                             rows={4}
-                            className="min-h-[140px] rounded-2xl border-none bg-white/80 text-base shadow-inner focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2"
+                            className="min-h-[140px] rounded-2xl border border-transparent bg-white/80 text-base shadow-inner focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2"
                           />
                         </FormControl>
                         <FormMessage />
@@ -516,7 +516,7 @@ export default function MathBuddyClient() {
                         <Button
                           type="submit"
                           size="lg"
-                          className="rounded-full bg-gradient-to-r from-[#7b61ff] via-[#ff6fb7] to-[#ffc15e] px-8 py-5 text-base font-semibold text-white shadow-lg hover:brightness-105"
+                          className="rounded-full bg-gradient-to-r from-primary to-accent px-8 py-5 text-base font-semibold text-white shadow-lg hover:brightness-105"
                         >
                           Check my answer
                         </Button>
@@ -546,7 +546,7 @@ export default function MathBuddyClient() {
                     animate={{ y: 0, opacity: 1, scale: 1 }}
                     exit={{ y: 12, opacity: 0 }}
                     transition={{ type: "spring", stiffness: 180, damping: 14 }}
-                    className="rounded-[2rem] border border-transparent bg-white/85 p-6 shadow-xl backdrop-blur-xl"
+                    className="rounded-[2rem] border border-border/60 bg-white/90 p-6 shadow-xl backdrop-blur-xl"
                   >
                     <div className="flex flex-col gap-4">
                       <div className="flex flex-wrap items-center gap-3">
@@ -607,7 +607,7 @@ export default function MathBuddyClient() {
                         <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                           <Button
                             onClick={handleNewProblem}
-                            className="rounded-full bg-gradient-to-r from-[#5eead4] to-[#7c5cff] px-6 text-white shadow-lg hover:brightness-110"
+                            className="rounded-full bg-gradient-to-r from-primary to-accent px-6 text-white shadow-lg hover:brightness-110"
                           >
                             New problem
                           </Button>
@@ -624,7 +624,7 @@ export default function MathBuddyClient() {
                     initial={{ y: 16, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     exit={{ y: 8, opacity: 0 }}
-                    className="rounded-[2rem] border border-dashed border-primary/40 bg-white/85 p-6 shadow-xl backdrop-blur-xl"
+                    className="rounded-[2rem] border border-dashed border-primary/30 bg-white/90 p-6 shadow-xl backdrop-blur-xl"
                   >
                     <h3 className="font-headline text-2xl text-primary">
                       Answer &amp; Working
@@ -669,7 +669,7 @@ export default function MathBuddyClient() {
                   control={generationForm.control}
                   name="primary"
                   render={({ field }) => (
-                    <FormItem className="space-y-3 rounded-3xl border border-transparent bg-white/85 p-5 shadow-lg backdrop-blur-xl">
+                    <FormItem className="space-y-3 rounded-3xl border border-border/60 bg-white/90 p-5 shadow-lg backdrop-blur-xl">
                       <FormLabel className="flex items-center gap-2 text-lg font-semibold text-primary">
                         <Trophy className="h-5 w-5" />
                         Primary Level
@@ -702,7 +702,7 @@ export default function MathBuddyClient() {
                   control={generationForm.control}
                   name="topic"
                   render={({ field }) => (
-                    <FormItem className="space-y-3 rounded-3xl border border-transparent bg-white/85 p-5 shadow-lg backdrop-blur-xl">
+                    <FormItem className="space-y-3 rounded-3xl border border-border/60 bg-white/90 p-5 shadow-lg backdrop-blur-xl">
                       <FormLabel className="flex items-center gap-2 text-lg font-semibold text-primary">
                         <BrainCircuit className="h-5 w-5" />
                         Topic
@@ -736,7 +736,7 @@ export default function MathBuddyClient() {
                   control={generationForm.control}
                   name="difficulty"
                   render={({ field }) => (
-                    <FormItem className="space-y-3 rounded-3xl border border-transparent bg-white/85 p-5 shadow-lg backdrop-blur-xl">
+                    <FormItem className="space-y-3 rounded-3xl border border-border/60 bg-white/90 p-5 shadow-lg backdrop-blur-xl">
                       <FormLabel className="flex items-center gap-2 text-lg font-semibold text-primary">
                         <Sparkles className="h-5 w-5" />
                         Difficulty
@@ -772,7 +772,7 @@ export default function MathBuddyClient() {
                     <Button
                       type="submit"
                       size="lg"
-                      className="h-full w-full rounded-3xl bg-gradient-to-r from-[#7b61ff] via-[#ff6fb7] to-[#ffc15e] text-lg font-semibold text-white shadow-[0_12px_30px_rgba(123,97,255,0.35)] hover:brightness-105"
+                      className="h-full w-full rounded-3xl bg-gradient-to-r from-primary to-accent text-lg font-semibold text-white shadow-[0_12px_30px_rgba(70,86,220,0.25)] hover:brightness-105"
                     >
                       Start my challenge
                     </Button>
@@ -792,10 +792,10 @@ export default function MathBuddyClient() {
       transition={{ type: "spring", stiffness: 120, damping: 18 }}
       className="w-full max-w-5xl"
     >
-      <Card className="relative overflow-hidden border-none bg-white/75 shadow-[0_40px_120px_rgba(123,97,255,0.28)] backdrop-blur-2xl rounded-[2.5rem] sm:rounded-[3rem]">
-        <div className="pointer-events-none absolute -left-28 -top-28 h-64 w-64 rounded-full bg-primary/25 blur-3xl" />
-        <div className="pointer-events-none absolute -right-32 top-12 h-72 w-72 rounded-full bg-accent/25 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-24 left-1/3 h-72 w-72 rounded-full bg-[#5eead4]/25 blur-3xl" />
+      <Card className="relative overflow-hidden rounded-[2.5rem] border border-border/60 bg-white/80 shadow-[0_40px_120px_rgba(70,86,220,0.2)] backdrop-blur-2xl sm:rounded-[3rem]">
+        <div className="pointer-events-none absolute -left-28 -top-28 h-64 w-64 rounded-full bg-primary/15 blur-3xl" />
+        <div className="pointer-events-none absolute -right-32 top-12 h-72 w-72 rounded-full bg-accent/15 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 left-1/3 h-72 w-72 rounded-full bg-primary/10 blur-3xl" />
         <AlertDialog open={showHintDialog} onOpenChange={setShowHintDialog}>
           <AlertDialogContent className="rounded-[2rem] border-none bg-white/90 backdrop-blur-xl">
             <AlertDialogHeader>
@@ -821,7 +821,7 @@ export default function MathBuddyClient() {
           </AlertDialogContent>
         </AlertDialog>
         <Sheet open={showHistorySheet} onOpenChange={setShowHistorySheet}>
-          <SheetContent className="w-full border-none bg-white/85 backdrop-blur-xl sm:max-w-lg">
+          <SheetContent className="w-full border-none bg-white/90 backdrop-blur-xl sm:max-w-lg">
             <SheetHeader className="space-y-2 text-left">
               <SheetTitle className="font-headline text-2xl text-primary">
                 Adventure Log
@@ -836,7 +836,7 @@ export default function MathBuddyClient() {
                   history.map((session) => (
                     <Card
                       key={session.id}
-                      className="rounded-2xl border-none bg-white/80 shadow-inner backdrop-blur-sm"
+                      className="rounded-2xl border border-border/40 bg-white/90 shadow-inner backdrop-blur-sm"
                     >
                       <CardHeader className="space-y-1">
                         <CardDescription className="text-sm text-muted-foreground">
@@ -871,7 +871,7 @@ export default function MathBuddyClient() {
                     </Card>
                   ))
                 ) : (
-                  <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-primary/30 bg-white/70 p-8 text-center shadow-inner">
+                  <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-primary/20 bg-white/75 p-8 text-center shadow-inner">
                     <HelpCircle className="h-10 w-10 text-primary" />
                     <p className="mt-4 font-semibold text-foreground">No History Yet</p>
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -885,7 +885,7 @@ export default function MathBuddyClient() {
         </Sheet>
         <CardHeader className="relative z-10 space-y-6 px-6 pb-6 pt-10 text-center sm:px-10">
           <motion.div
-            className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-primary via-accent to-[#ffc15e] text-white shadow-xl"
+            className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-accent text-white shadow-lg"
             initial={{ rotate: -8, scale: 0.85, opacity: 0 }}
             animate={{ rotate: 0, scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 200, damping: 14 }}
@@ -907,7 +907,7 @@ export default function MathBuddyClient() {
             transition={{ delay: 0.16, type: "spring", stiffness: 160, damping: 20 }}
           >
             <CardDescription className="text-base text-muted-foreground">
-              Your colourful playground for AI-powered math adventures.
+              A friendly workspace for guided, AI-powered math practice.
             </CardDescription>
           </motion.div>
           <motion.div
@@ -928,7 +928,7 @@ export default function MathBuddyClient() {
               initial={{ y: 12, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ type: "spring", stiffness: 180, damping: 18 }}
-              className="rounded-2xl bg-gradient-to-br from-primary via-[#9b7bff] to-[#ff73c6] p-5 text-left text-white shadow-lg"
+              className="rounded-2xl bg-primary p-5 text-left text-white shadow-lg"
             >
               <p className="text-xs uppercase tracking-[0.35em] text-white/75">
                 Solved
@@ -941,7 +941,7 @@ export default function MathBuddyClient() {
               initial={{ y: 12, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ delay: 0.05, type: "spring", stiffness: 180, damping: 18 }}
-              className="rounded-2xl bg-gradient-to-br from-[#5eead4] via-[#50b4ff] to-[#7b61ff] p-5 text-left text-white shadow-lg"
+              className="rounded-2xl bg-accent p-5 text-left text-white shadow-lg"
             >
               <p className="text-xs uppercase tracking-[0.35em] text-white/80">
                 Streak
@@ -961,7 +961,7 @@ export default function MathBuddyClient() {
               </p>
               <p className="mt-2 text-3xl font-headline text-primary">{successRate}%</p>
               <p className="text-sm text-muted-foreground">Overall score</p>
-              <Progress value={successRate} className="mt-4 h-3 overflow-hidden rounded-full bg-white/60" />
+              <Progress value={successRate} className="mt-4 h-3 overflow-hidden rounded-full bg-muted" />
             </motion.div>
             <motion.div
               initial={{ y: 12, opacity: 0 }}
