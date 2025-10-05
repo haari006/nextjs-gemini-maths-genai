@@ -161,12 +161,14 @@ export default function MathBuddyClient() {
     (value: string) => {
       const level = value as PrimaryLevel;
       if (level && PrimaryMathematicsSyllabus[level]) {
-        const syllabus = PrimaryMathematicsSyllabus[level];
-        const allTopics = [
-          ...Object.keys(syllabus.NumberAndAlgebra || {}),
-          ...Object.keys(syllabus.MeasurementAndGeometry || {}),
-          ...Object.keys(syllabus.Statistics || {}),
-        ];
+        const syllabus = PrimaryMathematicsSyllabus[level] as Record<
+          string,
+          Record<string, unknown>
+        >;
+        // Collect topic groups across all sections (e.g., NumberAndAlgebra, MeasurementAndGeometry, Statistics)
+        const allTopics = Object.values(syllabus).flatMap((section) =>
+          Object.keys(section ?? {})
+        );
         setTopics(allTopics);
       } else {
         setTopics([]);
