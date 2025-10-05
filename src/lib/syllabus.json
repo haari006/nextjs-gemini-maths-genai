@@ -1,0 +1,213 @@
+{
+  "PrimaryMathematicsSyllabus": {
+    "Primary1": {
+      "NumberAndAlgebra": {
+        "WholeNumbers": [
+          "Numbers up to 100",
+          "Addition and Subtraction",
+          "Multiplication and Division"
+        ],
+        "Money": [
+          "Counting amount of money up to $100"
+        ]
+      },
+      "MeasurementAndGeometry": {
+        "Measurement": [
+          "Length (cm)",
+          "Time (5-minute intervals, am/pm)"
+        ],
+        "Geometry": [
+          "2D Shapes (rectangle, square, triangle, circle, half/quarter circle)"
+        ]
+      },
+      "Statistics": {
+        "DataRepresentation": [
+          "Picture graphs - reading and interpreting data"
+        ]
+      }
+    },
+    "Primary2": {
+      "NumberAndAlgebra": {
+        "WholeNumbers": [
+          "Numbers up to 1000",
+          "Addition and Subtraction (up to 3 digits)",
+          "Multiplication tables (2,3,4,5,10)",
+          "Division within tables"
+        ],
+        "Fractions": [
+          "Fractions of a whole, notation, comparing like fractions"
+        ],
+        "Money": [
+          "Money in dollars and cents, comparing, conversion"
+        ]
+      },
+      "MeasurementAndGeometry": {
+        "Measurement": [
+          "Length (m)",
+          "Mass (kg/g)",
+          "Volume (litres)",
+          "Time (to minute, conversion hours↔minutes)"
+        ],
+        "Geometry": [
+          "2D patterns",
+          "3D shapes (cube, cuboid, cone, cylinder, sphere)"
+        ]
+      },
+      "Statistics": {
+        "DataRepresentation": [
+          "Picture graphs with scales"
+        ]
+      }
+    },
+    "Primary3": {
+      "NumberAndAlgebra": {
+        "WholeNumbers": [
+          "Numbers up to 10,000",
+          "Addition and Subtraction (up to 4 digits)",
+          "Multiplication tables (6–9)",
+          "Division with remainder"
+        ],
+        "Fractions": [
+          "Equivalent fractions",
+          "Simplest form",
+          "Comparing unlike fractions",
+          "Adding and subtracting related fractions"
+        ],
+        "Money": [
+          "Addition and subtraction of money in decimals"
+        ]
+      },
+      "MeasurementAndGeometry": {
+        "Measurement": [
+          "Length (km)",
+          "Volume (ml)",
+          "Compound unit conversion",
+          "Time (seconds, 24-hour clock)"
+        ],
+        "AreaAndPerimeter": [
+          "Concepts of area and perimeter",
+          "Measuring in cm²/m²",
+          "Area of rectangle/square"
+        ],
+        "Geometry": [
+          "Angles (right, acute, obtuse)",
+          "Perpendicular and parallel lines"
+        ]
+      },
+      "Statistics": {
+        "DataRepresentation": [
+          "Bar graphs - reading, interpreting with scales"
+        ]
+      }
+    },
+    "Primary4": {
+      "NumberAndAlgebra": {
+        "WholeNumbers": [
+          "Numbers up to 100,000",
+          "Factors and multiples",
+          "Four operations"
+        ],
+        "Fractions": [
+          "Mixed and improper fractions",
+          "Fraction of a set",
+          "Addition and subtraction of fractions"
+        ],
+        "Decimals": [
+          "Decimals up to 3 places",
+          "Rounding",
+          "Add/Subtract/Multiply/Divide decimals"
+        ]
+      },
+      "MeasurementAndGeometry": {
+        "AreaAndVolume": [
+          "Area/perimeter of rectangles and squares",
+          "Composite figures"
+        ],
+        "Geometry": [
+          "Angles (naming, measuring, drawing)",
+          "Rectangle and square properties",
+          "Line symmetry",
+          "Nets of 3D solids"
+        ]
+      },
+      "Statistics": {
+        "DataRepresentation": [
+          "Tables, line graphs, pie charts"
+        ]
+      }
+    },
+    "Primary5": {
+      "NumberAndAlgebra": {
+        "WholeNumbers": [
+          "Numbers up to 10 million",
+          "Four operations, order of operations"
+        ],
+        "Fractions": [
+          "Dividing whole numbers by fractions",
+          "Add/Subtract/Mix/Multiply fractions"
+        ],
+        "Decimals": [
+          "Multiplying/dividing decimals by 10,100,1000"
+        ],
+        "Percentage": [
+          "Expressing part as %",
+          "Finding % part",
+          "Discount, GST, interest"
+        ],
+        "Rate": [
+          "Finding rate, total, units given two quantities"
+        ]
+      },
+      "MeasurementAndGeometry": {
+        "AreaAndVolume": [
+          "Area of triangle",
+          "Volume of cube/cuboid",
+          "Liquid volume and cm³/ℓ relationship"
+        ],
+        "Geometry": [
+          "Angles on line, at a point, vertically opposite",
+          "Triangle properties",
+          "Parallelogram, rhombus, trapezium"
+        ]
+      }
+    },
+    "Primary6": {
+      "NumberAndAlgebra": {
+        "Fractions": [
+          "Dividing fractions",
+          "Add/Subtract/Mix/Multiply fractions"
+        ],
+        "Percentage": [
+          "Percentage increase/decrease, find whole"
+        ],
+        "Ratio": [
+          "Notation and equivalent ratios",
+          "Dividing quantities",
+          "Fraction–ratio relationships"
+        ],
+        "Algebra": [
+          "Letters for unknowns",
+          "Simple linear expressions",
+          "Evaluating/substituting values",
+          "Linear equations (whole-number coefficients)"
+        ]
+      },
+      "MeasurementAndGeometry": {
+        "AreaAndVolume": [
+          "Area/circumference of circle",
+          "Semi/quarter circles",
+          "Composite figures",
+          "Volume of cube/cuboid"
+        ],
+        "Geometry": [
+          "Special quadrilaterals, unknown angles in composite figures"
+        ]
+      },
+      "Statistics": {
+        "DataAnalysis": [
+          "Average (mean), relationship between total and number of data"
+        ]
+      }
+    }
+  }
+}
