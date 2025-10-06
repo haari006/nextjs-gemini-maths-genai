@@ -36,6 +36,14 @@ export type SessionConfig = {
   primary: string | null;
   topic: string | null;
   difficulty: "easy" | "medium" | "hard" | null;
+  questionType: "subjective" | "multipleChoice" | null;
+  model: string | null;
+};
+
+export type MathChoice = {
+  id: string;
+  label: string;
+  value: string;
 };
 
 export type MathSessionSummary = {
@@ -46,6 +54,7 @@ export type MathSessionSummary = {
   answer: string;
   working: WorkingStep[];
   hint: string | null;
+  choices: MathChoice[];
   latestSubmission: {
     id: string;
     createdAt: string;

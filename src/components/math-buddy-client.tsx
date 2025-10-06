@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { History, Info, Loader2, Sparkles } from "lucide-react";
+import { ChevronDown, History, Info, Loader2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -19,8 +19,11 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { GEMINI_MODEL_OPTIONS, GEMINI_MODEL_VALUES, type GeminiModelValue } from "@/lib/gemini-models";
 import { useToast } from "@/hooks/use-toast";
 import type { GenerateMathProblemOutput } from "@/ai/flows/generate-math-problems";
 import { PrimaryMathematicsSyllabus } from "@/lib/syllabus";
@@ -28,16 +31,26 @@ import { cn } from "@/lib/utils";
 import type { MathSessionSummary } from "@/types/math";
 import { MathText } from "./math-text";
 
+const questionTypeValues = ["subjective", "multipleChoice"] as const;
+const questionTypeOptions = [
+  { value: "subjective", label: "Subjective" },
+  { value: "multipleChoice", label: "Multiple choice" },
+] as const;
+
 const generationSchema = z.object({
   primary: z.string({ required_error: "Select a level." }),
   topic: z.string({ required_error: "Select a topic." }),
   difficulty: z.enum(["easy", "medium", "hard"]),
+  questionType: z.enum(questionTypeValues),
+  model: z.enum(GEMINI_MODEL_VALUES),
 });
 
 const defaultGenerationValues: z.infer<typeof generationSchema> = {
   primary: "Primary5",
   topic: "",
   difficulty: "easy",
+  questionType: "subjective",
+  model: GEMINI_MODEL_VALUES[0],
 };
 
 type PrimaryLevel = keyof typeof PrimaryMathematicsSyllabus;
@@ -69,7 +82,11 @@ function toPlainText(input: string) {
 }
 
 function parseNumericAnswer(value: string) {
-  const cleaned = value.replace(/,/g, "").trim();
+  const cleaned = value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/,/g, "")
+    .replace(/[a-zA-Z%°]+/g, (segment) => (/(cm|mm|m|km|g|kg|l|ml|°C|°F)/i.test(segment) ? "" : " "))
+    .trim();
   if (!cleaned) {
     return null;
   }
@@ -137,6 +154,9 @@ export default function MathBuddyClient() {
   const [isChecking, setIsChecking] = useState(false);
   const [isHintLoading, setIsHintLoading] = useState(false);
   const [isGeneratingSimilar, setIsGeneratingSimilar] = useState(false);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
+  const [selectedChoiceLabel, setSelectedChoiceLabel] = useState<string>("");
   const feedbackSectionRef = useRef<HTMLDivElement | null>(null);
 
   const formatTopicLabel = useCallback((topic: string) => {
@@ -171,11 +191,29 @@ export default function MathBuddyClient() {
       setHint(null);
       setFeedback(null);
       setHasChecked(false);
+      setSelectedChoiceId(null);
+      setSelectedChoiceLabel("");
       return;
     }
 
     setMode("question");
-    setAnswerValue(currentSession.latestSubmission?.userAnswer ?? "");
+    const questionType = currentSession.config.questionType ?? "subjective";
+    if (questionType === "multipleChoice") {
+      const latestAnswer = currentSession.latestSubmission?.userAnswer ?? "";
+      const matchedChoice = currentSession.choices.find(
+        (choice) =>
+          choice.id === latestAnswer ||
+          choice.label.trim().toLowerCase() === latestAnswer.trim().toLowerCase() ||
+          choice.value.trim() === latestAnswer.trim()
+      );
+      setSelectedChoiceId(matchedChoice ? matchedChoice.id : null);
+      setSelectedChoiceLabel(matchedChoice ? matchedChoice.label : latestAnswer);
+      setAnswerValue(matchedChoice ? matchedChoice.value : latestAnswer);
+    } else {
+      setSelectedChoiceId(null);
+      setSelectedChoiceLabel("");
+      setAnswerValue(currentSession.latestSubmission?.userAnswer ?? "");
+    }
     setHint(currentSession.hint ?? null);
     setFeedback(currentSession.latestSubmission?.feedback ?? null);
     setHasChecked(Boolean(currentSession.latestSubmission?.feedback));
@@ -241,6 +279,21 @@ export default function MathBuddyClient() {
     }
   }, []);
 
+  const handleChoiceSelect = useCallback(
+    (choiceId: string) => {
+      setSelectedChoiceId(choiceId);
+      const choice = currentSession?.choices.find((entry) => entry.id === choiceId);
+      if (choice) {
+        setSelectedChoiceLabel(choice.label);
+        setAnswerValue(choice.value);
+      } else {
+        setSelectedChoiceLabel("");
+        setAnswerValue("");
+      }
+    },
+    [currentSession]
+  );
+
   const fetchProblem = useCallback(
     async (values: z.infer<typeof generationSchema>) => {
       const response = await fetch("/api/generate-problem", {
@@ -270,6 +323,7 @@ export default function MathBuddyClient() {
           problem: generated.problem,
           answer: generated.answer,
           working: generated.working,
+          choices: generated.choices,
         }),
       });
 
@@ -290,6 +344,8 @@ export default function MathBuddyClient() {
       setCurrentSessionId(session.id);
       setMode("question");
       setAnswerValue("");
+      setSelectedChoiceId(null);
+      setSelectedChoiceLabel("");
       setHint(session.hint);
       setFeedback(session.latestSubmission?.feedback ?? null);
       setHasChecked(Boolean(session.latestSubmission?.feedback));
@@ -317,24 +373,45 @@ export default function MathBuddyClient() {
 
   const handleCheckAnswer = async () => {
     if (!currentSession) return;
-    const plainAnswer = toPlainText(answerValue);
+    const questionType = currentSession.config.questionType ?? "subjective";
+    let submissionAnswer = answerValue;
+    let comparisonAnswer = toPlainText(answerValue);
 
-    if (!plainAnswer) {
-      toast({
-        variant: "destructive",
-        title: "Add your answer",
-        description: "Type your working or final answer before checking.",
-      });
-      return;
-    }
-
-    if (parseNumericAnswer(plainAnswer) === null) {
-      toast({
-        variant: "destructive",
-        title: "Enter a numeric answer",
-        description: "Please provide a number so we can check it.",
-      });
-      return;
+    if (questionType === "multipleChoice" && currentSession.choices.length === 0) {
+      const plainAnswer = toPlainText(answerValue);
+      if (!plainAnswer) {
+        toast({
+          variant: "destructive",
+          title: "Add your answer",
+          description: "Type your final answer before checking.",
+        });
+        return;
+      }
+      submissionAnswer = answerValue;
+      comparisonAnswer = plainAnswer;
+    } else if (questionType === "multipleChoice") {
+      const activeChoice = currentSession.choices.find((choice) => choice.id === selectedChoiceId);
+      if (!activeChoice) {
+        toast({
+          variant: "destructive",
+          title: "Select an option",
+          description: "Choose one of the answers before checking.",
+        });
+        return;
+      }
+      submissionAnswer = selectedChoiceLabel || activeChoice.label;
+      comparisonAnswer = activeChoice.value;
+    } else {
+      const plainAnswer = toPlainText(answerValue);
+      if (!plainAnswer) {
+        toast({
+          variant: "destructive",
+          title: "Add your answer",
+          description: "Type your working or final answer before checking.",
+        });
+        return;
+      }
+      comparisonAnswer = plainAnswer;
     }
 
     try {
@@ -344,7 +421,7 @@ export default function MathBuddyClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           problem: currentSession.problem,
-          studentAnswer: answerValue,
+          studentAnswer: submissionAnswer,
           correctAnswer: currentSession.answer,
         }),
       });
@@ -369,7 +446,7 @@ export default function MathBuddyClient() {
         )
       );
 
-      if (data.submission.isCorrect || answersMatch(currentSession.answer, plainAnswer)) {
+      if (data.submission.isCorrect || answersMatch(currentSession.answer, comparisonAnswer)) {
         void triggerConfetti();
       }
     } catch (error: any) {
@@ -428,11 +505,13 @@ export default function MathBuddyClient() {
     setMode("form");
     if (currentSession) {
       if (hasCompleteConfig(currentSession.config)) {
-        const { primary, topic, difficulty } = currentSession.config;
+        const { primary, topic, difficulty, questionType, model } = currentSession.config;
         generationForm.reset({
           primary: primary as string,
           topic: topic as string,
           difficulty: difficulty as "easy" | "medium" | "hard",
+          questionType: (questionType as (typeof questionTypeValues)[number]) ?? defaultGenerationValues.questionType,
+          model: (model as GeminiModelValue) ?? defaultGenerationValues.model,
         });
         updateTopics(primary as PrimaryLevel, false);
       } else {
@@ -442,6 +521,8 @@ export default function MathBuddyClient() {
     }
     setCurrentSessionId(null);
     setAnswerValue("");
+    setSelectedChoiceId(null);
+    setSelectedChoiceLabel("");
     setHint(null);
     setFeedback(null);
     setHasChecked(false);
@@ -465,6 +546,9 @@ export default function MathBuddyClient() {
         primary: currentSession.config.primary as string,
         topic: currentSession.config.topic as string,
         difficulty: currentSession.config.difficulty as "easy" | "medium" | "hard",
+        questionType:
+          (currentSession.config.questionType as (typeof questionTypeValues)[number]) ?? defaultGenerationValues.questionType,
+        model: (currentSession.config.model as GeminiModelValue) ?? defaultGenerationValues.model,
       };
       const generated = await fetchProblem(generationConfig);
       const session = await createSession(generated, generationConfig);
@@ -576,6 +660,74 @@ export default function MathBuddyClient() {
                     </FormItem>
                   )}
                 />
+                <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen} className="space-y-3">
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="flex items-center gap-2 px-0 text-sm font-semibold text-primary hover:text-primary"
+                    >
+                      Advanced options
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 transition-transform",
+                          isAdvancedOpen ? "rotate-180" : "rotate-0"
+                        )}
+                        aria-hidden
+                      />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="grid gap-4 sm:grid-cols-2">
+                    <FormField
+                      control={generationForm.control}
+                      name="questionType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Question type</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger aria-label="Select question type">
+                                <SelectValue placeholder="Select a question type" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {questionTypeOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={generationForm.control}
+                      name="model"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Gemini model</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger aria-label="Select Gemini model">
+                                <SelectValue placeholder="Select a model" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {GEMINI_MODEL_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </CollapsibleContent>
+                </Collapsible>
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit" disabled={isGenerating}>
                     {isGenerating ? (
@@ -601,11 +753,25 @@ export default function MathBuddyClient() {
           <CardHeader className="space-y-2">
             <CardTitle className="text-lg font-semibold text-foreground">Generated question</CardTitle>
             <CardDescription className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <Badge variant="outline" className="rounded-full border px-3 py-1 text-xs font-semibold text-primary">
-                {currentSession.config.difficulty.toUpperCase()}
-              </Badge>
+              {currentSession.config.difficulty ? (
+                <Badge variant="outline" className="rounded-full border px-3 py-1 text-xs font-semibold text-primary">
+                  {currentSession.config.difficulty.toUpperCase()}
+                </Badge>
+              ) : null}
+              {currentSession.config.questionType ? (
+                <Badge variant="outline" className="rounded-full border px-3 py-1 text-xs font-semibold text-primary/80">
+                  {currentSession.config.questionType === "multipleChoice" ? "Multiple choice" : "Subjective"}
+                </Badge>
+              ) : null}
               <span>
-                {`Level ${currentSession.config.primary.replace(/([0-9]+)/, " $1")}`} · {formatTopicLabel(currentSession.config.topic)}
+                {[
+                  currentSession.config.primary
+                    ? `Level ${currentSession.config.primary.replace(/([0-9]+)/, " $1")}`
+                    : null,
+                  currentSession.config.topic ? formatTopicLabel(currentSession.config.topic) : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "Stored without generation options"}
               </span>
             </CardDescription>
           </CardHeader>
@@ -614,12 +780,54 @@ export default function MathBuddyClient() {
               <MathText text={currentSession.problem} />
             </div>
             <div className="space-y-4">
-              <Textarea
-                value={answerValue}
-                onChange={(event) => setAnswerValue(event.target.value)}
-                placeholder="Describe your steps and final answer here."
-                rows={6}
-              />
+              {currentSession.config.questionType === "multipleChoice" ? (
+                <div className="space-y-3">
+                  {currentSession.choices.length ? (
+                    <RadioGroup
+                      value={selectedChoiceId ?? ""}
+                      onValueChange={handleChoiceSelect}
+                      className="space-y-3"
+                    >
+                      {currentSession.choices.map((choice) => (
+                        <label
+                          key={choice.id}
+                          className={cn(
+                            "flex w-full cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 text-sm shadow-sm transition",
+                            selectedChoiceId === choice.id
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border/60 bg-muted/10 text-foreground"
+                          )}
+                        >
+                          <RadioGroupItem value={choice.id} />
+                          <div>
+                            <p className="font-semibold">{choice.label}</p>
+                            <p className="text-xs text-muted-foreground">Value: {choice.value}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </RadioGroup>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Choices were not saved for this question. Record your answer manually instead.
+                      </p>
+                      <Textarea
+                        value={answerValue}
+                        onChange={(event) => setAnswerValue(event.target.value)}
+                        placeholder="Type your final answer here."
+                        rows={4}
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Textarea
+                  value={answerValue}
+                  onChange={(event) => setAnswerValue(event.target.value)}
+                  placeholder="Describe your steps and final answer here."
+                  rows={6}
+                />
+              )}
               <div className="flex flex-wrap gap-3">
                 <Button type="button" onClick={handleCheckAnswer} disabled={isChecking}>
                   {isChecking ? (

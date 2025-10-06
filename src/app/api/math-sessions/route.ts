@@ -9,15 +9,24 @@ const WorkingStepSchema = z.object({
   formula: z.string(),
 });
 
+const ChoiceSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  value: z.string(),
+});
+
 const CreateSessionSchema = z.object({
   config: z.object({
     primary: z.string(),
     topic: z.string(),
     difficulty: z.enum(["easy", "medium", "hard"]),
+    questionType: z.enum(["subjective", "multipleChoice"]).default("subjective"),
+    model: z.string().optional(),
   }),
   problem: z.string(),
   answer: z.string(),
   working: z.array(WorkingStepSchema),
+  choices: z.array(ChoiceSchema).optional(),
 });
 
 const ListQuerySchema = z.object({
@@ -32,6 +41,12 @@ const ListQuerySchema = z.object({
 function normalizeWorking(working: unknown) {
   const result = WorkingStepSchema.array().safeParse(working);
   return result.success ? result.data : [];
+}
+
+function normalizeChoices(choices: unknown) {
+  if (!choices) return [];
+  const parsed = ChoiceSchema.array().safeParse(choices);
+  return parsed.success ? parsed.data : [];
 }
 
 function computeLatestSubmission(submissions: any[] = []) {
@@ -57,7 +72,11 @@ function toPlainText(input: string) {
 }
 
 function parseNumericAnswer(value: string) {
-  const cleaned = value.replace(/,/g, "").trim();
+  const cleaned = value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/,/g, "")
+    .replace(/[a-zA-Z%°]+/g, (segment) => (/(cm|mm|m|km|g|kg|l|ml|°C|°F)/i.test(segment) ? "" : " "))
+    .trim();
   if (!cleaned) {
     return null;
   }
@@ -105,6 +124,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { config, problem, answer, working } = parsed.data;
+    const choices = normalizeChoices(parsed.data.choices ?? []);
 
     const numericAnswer = parseNumericAnswer(toPlainText(answer));
 
@@ -140,11 +160,14 @@ export async function POST(req: NextRequest) {
           primary: config.primary ?? null,
           topic: config.topic ?? null,
           difficulty: config.difficulty ?? null,
+          questionType: config.questionType ?? null,
+          model: config.model ?? null,
         },
         problem: data.problem_text,
         answer,
         working: normalizeWorking(working),
         hint: null,
+        choices,
         latestSubmission: null,
       },
     });
@@ -234,11 +257,14 @@ export async function GET(req: NextRequest) {
           primary: null,
           topic: null,
           difficulty: null,
+          questionType: null,
+          model: null,
         },
         problem: session.problem_text,
         answer: session.correct_answer !== null ? String(session.correct_answer) : "",
         working: [],
         hint: null,
+        choices: [],
         latestSubmission: latest
           ? {
               id: latest.id,

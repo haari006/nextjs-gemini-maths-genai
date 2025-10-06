@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { extractNumericAnswer } from "@/ai/flows/extract-numeric-answer";
 import { providePersonalizedFeedback } from "@/ai/flows/provide-personalized-feedback";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
@@ -8,10 +9,6 @@ const SubmissionSchema = z.object({
   problem: z.string(),
   correctAnswer: z.string(),
   studentAnswer: z.string(),
-});
-
-const paramsSchema = z.object({
-  id: z.string().uuid().or(z.string().min(1)),
 });
 
 function toPlainText(input: string) {
@@ -26,7 +23,10 @@ function toPlainText(input: string) {
 }
 
 function parseNumericAnswer(value: string) {
-  const cleaned = toPlainText(value).replace(/,/g, "").trim();
+  const cleaned = toPlainText(value)
+    .replace(/,/g, "")
+    .replace(/[a-zA-Z%°]+/g, (segment) => (/(cm|mm|m|km|g|kg|l|ml|°C|°F)/i.test(segment) ? "" : " "))
+    .trim();
   if (!cleaned) {
     return null;
   }
@@ -54,12 +54,9 @@ function parseNumericAnswer(value: string) {
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const parsedParams = paramsSchema.safeParse(params);
-    if (!parsedParams.success) {
-      return NextResponse.json(
-        { error: "Invalid session id" },
-        { status: 400 }
-      );
+    const sessionId = typeof params?.id === "string" && params.id.trim() ? params.id.trim() : null;
+    if (!sessionId) {
+      return NextResponse.json({ error: "Invalid session id" }, { status: 400 });
     }
 
     const payload = await request.json();
@@ -83,10 +80,19 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const { problem, correctAnswer, studentAnswer } = parsedPayload.data;
 
-    const numericStudentAnswer = parseNumericAnswer(studentAnswer);
+    let numericStudentAnswer = parseNumericAnswer(studentAnswer);
+    if (numericStudentAnswer === null) {
+      try {
+        const aiResult = await extractNumericAnswer({ answer: studentAnswer });
+        numericStudentAnswer = aiResult.numericAnswer;
+      } catch (error) {
+        console.warn("Failed to extract numeric answer with AI", error);
+      }
+    }
+
     if (numericStudentAnswer === null) {
       return NextResponse.json(
-        { error: "Please provide a numeric answer to check." },
+        { error: "We couldn't understand the numeric value in your answer. Try stating the number clearly." },
         { status: 422 }
       );
     }
@@ -110,7 +116,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const { data, error } = await supabase
       .from("math_problem_submissions")
       .insert({
-        session_id: parsedParams.data.id,
+        session_id: sessionId,
         user_answer: numericStudentAnswer,
         is_correct: isCorrect,
         feedback_text: feedbackResult.feedback,

@@ -7,18 +7,11 @@ const UpdateSchema = z.object({
   hint: z.string().min(1).optional(),
 });
 
-const paramsSchema = z.object({
-  id: z.string().uuid().or(z.string().min(1)),
-});
-
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const parsedParams = paramsSchema.safeParse(params);
-    if (!parsedParams.success) {
-      return NextResponse.json(
-        { error: "Invalid session id" },
-        { status: 400 }
-      );
+    const sessionId = typeof params?.id === "string" && params.id.trim() ? params.id.trim() : null;
+    if (!sessionId) {
+      return NextResponse.json({ error: "Invalid session id" }, { status: 400 });
     }
 
     const supabase = createServerSupabaseClient();
@@ -47,7 +40,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
           )
         `
       )
-      .eq("id", parsedParams.data.id)
+      .eq("id", sessionId)
       .maybeSingle();
 
     if (error) {
@@ -85,11 +78,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
           primary: null,
           topic: null,
           difficulty: null,
+          questionType: null,
+          model: null,
         },
         problem: data.problem_text,
         answer: data.correct_answer !== null ? String(data.correct_answer) : "",
         working: [],
         hint: null,
+        choices: [],
         latestSubmission,
         submissions,
       },
@@ -105,12 +101,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const parsedParams = paramsSchema.safeParse(params);
-    if (!parsedParams.success) {
-      return NextResponse.json(
-        { error: "Invalid session id" },
-        { status: 400 }
-      );
+    const sessionId = typeof params?.id === "string" && params.id.trim() ? params.id.trim() : null;
+    if (!sessionId) {
+      return NextResponse.json({ error: "Invalid session id" }, { status: 400 });
     }
 
     const body = await request.json();

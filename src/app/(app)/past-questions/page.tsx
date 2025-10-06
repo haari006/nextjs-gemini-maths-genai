@@ -56,7 +56,7 @@ export default function PastQuestionsPage() {
 
     try {
       setLoading(true);
-      const response = await fetch(`/api/math-sessions?${params.toString()}`);
+      const response = await fetch(`/api/past-questions?${params.toString()}`);
       if (!response.ok) {
         throw new Error("Unable to fetch history");
       }
