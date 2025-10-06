@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GraduationCap, ListChecks } from "lucide-react";
+import { GraduationCap, History, ListChecks } from "lucide-react";
 
 import {
   Sidebar,
@@ -31,6 +31,11 @@ const routes = [
     href: "/questions",
     label: "Question Lab",
     icon: ListChecks,
+  },
+  {
+    href: "/past-questions",
+    label: "Past questions",
+    icon: History,
   },
 ];
 

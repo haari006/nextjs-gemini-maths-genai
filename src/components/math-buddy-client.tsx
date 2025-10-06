@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CheckCircle2, History, Loader2, Sparkles, XCircle } from "lucide-react";
+import { History, Info, Loader2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -122,7 +122,7 @@ export default function MathBuddyClient() {
     () => history.find((entry) => entry.id === currentSessionId) ?? null,
     [history, currentSessionId]
   );
-  const [answerHtml, setAnswerHtml] = useState("");
+  const [answerValue, setAnswerValue] = useState("");
   const [hint, setHint] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [hasChecked, setHasChecked] = useState(false);
@@ -130,6 +130,7 @@ export default function MathBuddyClient() {
   const [isChecking, setIsChecking] = useState(false);
   const [isHintLoading, setIsHintLoading] = useState(false);
   const [isGeneratingSimilar, setIsGeneratingSimilar] = useState(false);
+  const feedbackSectionRef = useRef<HTMLDivElement | null>(null);
 
   const formatTopicLabel = useCallback((topic: string) => {
     return topic.replace(/([A-Z])/g, " $1").replace(/\s+/g, " ").trim();
@@ -151,14 +152,14 @@ export default function MathBuddyClient() {
 
   useEffect(() => {
     if (!currentSession) {
-      setAnswerHtml("");
+      setAnswerValue("");
       setHint(null);
       setFeedback(null);
       setHasChecked(false);
       return;
     }
 
-    setAnswerHtml(currentSession.userAnswerHtml ?? "");
+    setAnswerValue(currentSession.userAnswerText ?? currentSession.userAnswerHtml ?? "");
     setHint(currentSession.hint ?? null);
     setFeedback(currentSession.feedback ?? null);
     setHasChecked(Boolean(currentSession.feedback));
@@ -193,6 +194,23 @@ export default function MathBuddyClient() {
     [generationForm, updateTopics]
   );
 
+  const triggerConfetti = useCallback(async () => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const module = await import("canvas-confetti");
+      const confetti = module.default;
+      confetti({
+        spread: 75,
+        particleCount: 160,
+        origin: { y: 0.3 },
+        scalar: 0.9,
+      });
+    } catch (error) {
+      console.warn("Unable to launch confetti", error);
+    }
+  }, []);
+
   const fetchProblem = useCallback(
     async (values: z.infer<typeof generationSchema>) => {
       const response = await fetch("/api/generate-problem", {
@@ -226,6 +244,10 @@ export default function MathBuddyClient() {
       setHistory((previous) => [session, ...previous]);
       setCurrentSessionId(session.id);
       setMode("question");
+      setAnswerValue("");
+      setHint(null);
+      setFeedback(null);
+      setHasChecked(false);
     },
     []
   );
@@ -248,7 +270,7 @@ export default function MathBuddyClient() {
 
   const handleCheckAnswer = async () => {
     if (!currentSession) return;
-    const answerText = toPlainText(answerHtml);
+    const answerText = toPlainText(answerValue);
 
     if (!answerText) {
       toast({
@@ -287,7 +309,7 @@ export default function MathBuddyClient() {
           entry.id === currentSession.id
             ? {
                 ...entry,
-                userAnswerHtml: answerHtml,
+                userAnswerHtml: undefined,
                 userAnswerText: answerText,
                 feedback: feedbackText,
                 isCorrect: correct,
@@ -295,6 +317,10 @@ export default function MathBuddyClient() {
             : entry
         )
       );
+
+      if (correct) {
+        void triggerConfetti();
+      }
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -348,6 +374,10 @@ export default function MathBuddyClient() {
       updateTopics(currentSession.config.primary as PrimaryLevel, false);
     }
     setCurrentSessionId(null);
+    setAnswerValue("");
+    setHint(null);
+    setFeedback(null);
+    setHasChecked(false);
   };
 
   const handleGenerateSimilar = async () => {
@@ -369,6 +399,11 @@ export default function MathBuddyClient() {
   };
 
   const hasHistory = history.length > 0;
+
+  useEffect(() => {
+    if (!hasChecked || !feedback || !feedbackSectionRef.current) return;
+    feedbackSectionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [hasChecked, feedback, currentSession?.id]);
 
   return (
     <div className="space-y-8">
@@ -488,9 +523,9 @@ export default function MathBuddyClient() {
             </div>
             <div className="space-y-4">
               <RichAnswerEditor
-                value={answerHtml}
-                onChange={setAnswerHtml}
-                placeholder="Type your steps, highlight key working, or paste your final answer here."
+                value={answerValue}
+                onChange={setAnswerValue}
+                placeholder="Describe your steps and final answer here."
               />
               <div className="flex flex-wrap gap-3">
                 <Button type="button" onClick={handleCheckAnswer} disabled={isChecking}>
@@ -529,14 +564,16 @@ export default function MathBuddyClient() {
       )}
 
       {hasChecked && currentSession && feedback && (
-        <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
+        <Card ref={feedbackSectionRef} className="rounded-2xl border border-border/60 bg-white shadow-sm">
           <CardHeader className="space-y-2">
             <div className="flex items-center gap-2">
-              {currentSession.isCorrect ? (
-                <CheckCircle2 className="h-5 w-5 text-primary" aria-hidden />
-              ) : (
-                <XCircle className="h-5 w-5 text-destructive" aria-hidden />
-              )}
+              <Info
+                className={cn(
+                  "h-5 w-5",
+                  currentSession.isCorrect ? "text-primary" : "text-destructive"
+                )}
+                aria-hidden
+              />
               <CardTitle className="text-lg font-semibold text-foreground">Feedback</CardTitle>
             </div>
             <CardDescription className="text-sm text-muted-foreground">
@@ -580,6 +617,9 @@ export default function MathBuddyClient() {
                 Tap to revisit full working and your submissions.
               </CardDescription>
             </div>
+            <Button asChild variant="outline" size="sm" className="border-border/60">
+              <Link href="/past-questions">View all</Link>
+            </Button>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">

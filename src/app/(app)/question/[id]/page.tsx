@@ -16,6 +16,18 @@ function formatTopicLabel(topic: string) {
   return topic.replace(/([A-Z])/g, " $1").replace(/\s+/g, " ").trim();
 }
 
+function htmlToPlainText(input: string) {
+  return input
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>(?=\s|$)/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function statusConfig(session: StoredQuestionSession | null) {
   if (!session || session.isCorrect === undefined) {
     return { label: "Awaiting check", className: "border-border/60 bg-muted/40 text-muted-foreground" };
@@ -47,6 +59,16 @@ export default function QuestionDetailPage() {
   }, [params?.id]);
 
   const status = useMemo(() => statusConfig(session), [session]);
+  const userAnswer = useMemo(() => {
+    if (!session) return "";
+    if (session.userAnswerText && session.userAnswerText.trim().length > 0) {
+      return session.userAnswerText;
+    }
+    if (session.userAnswerHtml && session.userAnswerHtml.trim().length > 0) {
+      return htmlToPlainText(session.userAnswerHtml);
+    }
+    return "";
+  }, [session]);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
@@ -120,9 +142,13 @@ export default function QuestionDetailPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {session.userAnswerHtml ? (
+              {userAnswer ? (
+                <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-2xl border border-border/40 bg-muted/10 p-4 text-sm leading-relaxed text-foreground">
+                  {userAnswer}
+                </pre>
+              ) : session.userAnswerHtml ? (
                 <div
-                  className="rich-answer max-h-80 overflow-y-auto rounded-2xl border border-border/40 bg-muted/10 p-4 text-sm leading-relaxed text-foreground [&_strong]:font-semibold [&_em]:italic [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-2 [&_p:last-child]:mb-0"
+                  className="rich-answer max-h-80 overflow-y-auto rounded-2xl border border-border/40 bg-muted/10 p-4 text-sm leading-relaxed text-foreground"
                   dangerouslySetInnerHTML={{ __html: session.userAnswerHtml }}
                 />
               ) : (

@@ -1,18 +1,43 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import type { GenerateMathProblemOutput } from "@/ai/flows/generate-math-problems";
 
-function sanitizeFormula(formula: string) {
+function latexToReadable(formula: string) {
   return formula
-    .replace(/\\\\/g, " ")
-    .replace(/\\n/g, " ")
-    .replace(/\$+/g, "")
-    .replace(/\{\}/g, "")
-    .replace(/\\text\{([^}]*)\}/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, "$1 ÷ $2")
+    .replace(/\\times/g, "×")
+    .replace(/\\cdot/g, "·")
+    .replace(/\\div/g, "÷")
+    .replace(/\\sqrt\{([^}]*)\}/g, "√($1)")
+    .replace(/\\left\(/g, "(")
+    .replace(/\\right\)/g, ")")
+    .replace(/\\left\[/g, "[")
+    .replace(/\\right\]/g, "]")
+    .replace(/\\left\{/g, "{")
+    .replace(/\\right\}/g, "}")
+    .replace(/\\pi/g, "π")
+    .replace(/\\geq/g, "≥")
+    .replace(/\\leq/g, "≤")
+    .replace(/\\approx/g, "≈")
+    .replace(/\\%/g, "%")
+    .replace(/\\pm/g, "±")
+    .replace(/\\_/g, "_")
+    .replace(/\\^/g, "^");
+}
+
+function sanitizeFormula(formula: string) {
+  return latexToReadable(
+    formula
+      .replace(/\\\\/g, " ")
+      .replace(/\\n/g, " ")
+      .replace(/\$+/g, "")
+      .replace(/\{\}/g, "")
+      .replace(/\\text\{([^}]*)\}/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 function wrapText(
@@ -49,69 +74,111 @@ function wrapText(
   return currentY;
 }
 
+function estimateHeight(working: GenerateMathProblemOutput["working"], maxWidth: number, lineHeight: number) {
+  return working.reduce((height, step) => {
+    const explanationLength = Math.max(Math.ceil(step.explanation.length / (maxWidth / 10)), 1);
+    const formulaLength = Math.max(Math.ceil(sanitizeFormula(step.formula).length / (maxWidth / 12)), 1);
+    return height + (explanationLength + formulaLength + 1) * lineHeight;
+  }, 0);
+}
+
 export function WorkingCanvas({ working }: { working: GenerateMathProblemOutput["working"] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const renderCanvas = useCallback(
+    (containerWidth: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const context = canvas.getContext("2d");
+      if (!context) return;
+
+      const lineHeight = 28;
+      const basePadding = 24;
+      const maxWidth = Math.max(containerWidth - basePadding * 2, 260);
+      const estimatedContentHeight = estimateHeight(working, maxWidth, lineHeight);
+      const height = Math.max(220, estimatedContentHeight + basePadding * 2);
+
+      const devicePixelRatio = window.devicePixelRatio || 1;
+      canvas.width = containerWidth * devicePixelRatio;
+      canvas.height = height * devicePixelRatio;
+      canvas.style.width = `${containerWidth}px`;
+      canvas.style.height = `${height}px`;
+
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.scale(devicePixelRatio, devicePixelRatio);
+      context.clearRect(0, 0, containerWidth, height);
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, containerWidth, height);
+
+      context.textBaseline = "top";
+
+      let currentY = basePadding;
+
+      for (const step of working) {
+        context.font = "16px 'Nunito', 'Baloo 2', sans-serif";
+        currentY = wrapText(
+          context,
+          `Step ${step.step}: ${step.explanation}`,
+          basePadding,
+          currentY,
+          maxWidth,
+          lineHeight,
+          "#0f172a"
+        );
+
+        const readableFormula = sanitizeFormula(step.formula);
+        if (readableFormula) {
+          context.font = "18px 'Baloo 2', 'Nunito', sans-serif";
+          currentY = wrapText(
+            context,
+            readableFormula,
+            basePadding + 16,
+            currentY,
+            maxWidth,
+            lineHeight,
+            "#2563eb"
+          );
+        }
+
+        currentY += lineHeight / 2;
+      }
+    },
+    [working]
+  );
+
   useEffect(() => {
+    if (typeof window === "undefined") return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const context = canvas.getContext("2d");
-    if (!context) return;
+    const parent = canvas.parentElement;
+    if (!parent) return;
 
-    const containerWidth = canvas.parentElement?.clientWidth ?? 640;
-    const lineHeight = 28;
-    const basePadding = 24;
-    const maxWidth = containerWidth - basePadding * 2;
-    const totalLines = working.reduce((count, step) => {
-      const explanationLength = Math.max(step.explanation.length / 45, 1);
-      const formulaLength = Math.max(sanitizeFormula(step.formula).length / 35, 1);
-      return count + Math.ceil(explanationLength) + Math.ceil(formulaLength) + 1;
-    }, 1);
-    const height = Math.max(200, totalLines * lineHeight + basePadding * 2);
+    const handleResize = (width: number) => {
+      const nextWidth = Math.max(Math.floor(width), 280);
+      renderCanvas(nextWidth);
+    };
 
-    const devicePixelRatio = window.devicePixelRatio || 1;
-    canvas.width = containerWidth * devicePixelRatio;
-    canvas.height = height * devicePixelRatio;
-    canvas.style.width = `${containerWidth}px`;
-    canvas.style.height = `${height}px`;
+    handleResize(parent.clientWidth);
 
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    context.scale(devicePixelRatio, devicePixelRatio);
-    context.clearRect(0, 0, containerWidth, height);
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, containerWidth, height);
-
-    context.font = "16px 'Nunito', 'Baloo 2', sans-serif";
-    context.textBaseline = "top";
-
-    let currentY = basePadding;
-
-    for (const step of working) {
-      currentY = wrapText(
-        context,
-        `Step ${step.step}: ${step.explanation}`,
-        basePadding,
-        currentY,
-        maxWidth,
-        lineHeight,
-        "#0f172a"
-      );
-
-      currentY = wrapText(
-        context,
-        sanitizeFormula(step.formula),
-        basePadding + 16,
-        currentY,
-        maxWidth,
-        lineHeight,
-        "#2563eb"
-      );
-
-      currentY += lineHeight / 2;
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.target === parent) {
+            handleResize(entry.contentRect.width);
+          }
+        }
+      });
+      observer.observe(parent);
+      return () => observer.disconnect();
     }
-  }, [working]);
 
-  return <canvas ref={canvasRef} className="w-full rounded-2xl border border-border/60 shadow-sm" />;
+    const resizeListener = () => handleResize(parent.clientWidth);
+    window.addEventListener("resize", resizeListener);
+    return () => window.removeEventListener("resize", resizeListener);
+  }, [renderCanvas]);
+
+  return <canvas ref={canvasRef} className="w-full rounded-2xl border border-border/60 shadow-sm" role="img" aria-label="Answer working steps" />;
 }
