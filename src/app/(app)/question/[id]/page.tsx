@@ -8,67 +8,62 @@ import { WorkingCanvas } from "@/components/working-canvas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { loadHistory, StoredQuestionSession } from "@/lib/history-storage";
+import type { MathSessionDetail } from "@/types/math";
 import { cn } from "@/lib/utils";
 import { MathText } from "@/components/math-text";
+
+type SessionResponse = {
+  session: MathSessionDetail;
+};
 
 function formatTopicLabel(topic: string) {
   return topic.replace(/([A-Z])/g, " $1").replace(/\s+/g, " ").trim();
 }
 
-function htmlToPlainText(input: string) {
-  return input
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<br\s*\/?>(?=\s|$)/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function statusConfig(session: StoredQuestionSession | null) {
-  if (!session || session.isCorrect === undefined) {
+function statusConfig(session: MathSessionDetail | null) {
+  if (!session || !session.latestSubmission) {
     return { label: "Awaiting check", className: "border-border/60 bg-muted/40 text-muted-foreground" };
   }
 
-  return session.isCorrect
+  return session.latestSubmission.isCorrect
     ? { label: "Correct", className: "border-primary/30 bg-primary/10 text-primary" }
     : { label: "Review again", className: "border-destructive/30 bg-destructive/10 text-destructive" };
 }
 
 export default function QuestionDetailPage() {
   const params = useParams<{ id: string }>();
-  const [session, setSession] = useState<StoredQuestionSession | null>(null);
-  const [isReady, setIsReady] = useState(false);
+  const [session, setSession] = useState<MathSessionDetail | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const identifier = Array.isArray(params?.id) ? params?.id[0] : params?.id;
-    if (!identifier) {
-      setSession(null);
-      setIsReady(true);
-      return;
-    }
+    const loadSession = async (identifier: string) => {
+      try {
+        setIsLoading(true);
+        const response = await fetch(`/api/math-sessions/${identifier}`);
+        if (!response.ok) {
+          throw new Error("Unable to fetch session");
+        }
+        const data: SessionResponse = await response.json();
+        setSession(data.session ?? null);
+      } catch (error) {
+        console.warn(error);
+        setSession(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-    const history = loadHistory();
-    const found = history.find((entry) => entry.id === identifier) ?? null;
-    setSession(found);
-    setIsReady(true);
+    const identifier = Array.isArray(params?.id) ? params?.id[0] : params?.id;
+    if (identifier) {
+      void loadSession(identifier);
+    } else {
+      setSession(null);
+      setIsLoading(false);
+    }
   }, [params?.id]);
 
   const status = useMemo(() => statusConfig(session), [session]);
-  const userAnswer = useMemo(() => {
-    if (!session) return "";
-    if (session.userAnswerText && session.userAnswerText.trim().length > 0) {
-      return session.userAnswerText;
-    }
-    if (session.userAnswerHtml && session.userAnswerHtml.trim().length > 0) {
-      return htmlToPlainText(session.userAnswerHtml);
-    }
-    return "";
-  }, [session]);
+  const latestSubmission = session?.latestSubmission ?? null;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
@@ -96,7 +91,7 @@ export default function QuestionDetailPage() {
         </ol>
       </nav>
 
-      {!isReady ? (
+      {isLoading ? (
         <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
           <CardHeader>
             <CardTitle className="text-lg font-semibold text-foreground">Loading question…</CardTitle>
@@ -108,7 +103,21 @@ export default function QuestionDetailPage() {
             <div className="h-32 animate-pulse rounded-2xl bg-muted/40" />
           </CardContent>
         </Card>
-      ) : session ? (
+      ) : !session ? (
+        <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-foreground">Session not found</CardTitle>
+            <CardDescription className="text-sm text-muted-foreground">
+              This question may have been removed. Head back to generate a new challenge.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link href="/questions">Return to Question Lab</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
         <>
           <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
             <CardHeader className="space-y-2">
@@ -142,24 +151,17 @@ export default function QuestionDetailPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {userAnswer ? (
+              {latestSubmission?.userAnswer ? (
                 <pre className="max-h-80 overflow-y-auto whitespace-pre-wrap rounded-2xl border border-border/40 bg-muted/10 p-4 text-sm leading-relaxed text-foreground">
-                  {userAnswer}
+                  {latestSubmission.userAnswer}
                 </pre>
-              ) : session.userAnswerHtml ? (
-                <div
-                  className="rich-answer max-h-80 overflow-y-auto rounded-2xl border border-border/40 bg-muted/10 p-4 text-sm leading-relaxed text-foreground"
-                  dangerouslySetInnerHTML={{ __html: session.userAnswerHtml }}
-                />
               ) : (
-                <p className="text-sm text-muted-foreground">
-                  You didn’t submit an answer for this question.
-                </p>
+                <p className="text-sm text-muted-foreground">You didn’t submit an answer for this question.</p>
               )}
             </CardContent>
           </Card>
 
-          {session.feedback && (
+          {latestSubmission?.feedback && (
             <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
               <CardHeader>
                 <CardTitle className="text-lg font-semibold text-foreground">Coach feedback</CardTitle>
@@ -168,7 +170,9 @@ export default function QuestionDetailPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <p className="rounded-2xl border border-border/40 bg-muted/20 p-4 text-sm text-foreground/90">{session.feedback}</p>
+                <p className="rounded-2xl border border-border/40 bg-muted/20 p-4 text-sm text-foreground/90">
+                  {latestSubmission.feedback}
+                </p>
               </CardContent>
             </Card>
           )}
@@ -179,7 +183,9 @@ export default function QuestionDetailPage() {
                 <CardTitle className="text-lg font-semibold text-foreground">Hint provided</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="rounded-2xl border border-dashed border-primary/30 bg-primary/5 p-4 text-sm text-primary">{session.hint}</p>
+                <p className="rounded-2xl border border-dashed border-primary/30 bg-primary/5 p-4 text-sm text-primary">
+                  {session.hint}
+                </p>
               </CardContent>
             </Card>
           )}
@@ -193,37 +199,11 @@ export default function QuestionDetailPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <WorkingCanvas working={session.working} />
+                <WorkingCanvas working={session.working} finalAnswer={session.answer} />
               </CardContent>
             </Card>
           )}
-
-          <div className="flex flex-wrap gap-3">
-            <Button asChild>
-              <Link href="/questions">Generate another question</Link>
-            </Button>
-            <Button asChild variant="outline" className="border-border/60">
-              <Link href="/dashboard">Back to dashboard</Link>
-            </Button>
-          </div>
         </>
-      ) : (
-        <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold text-foreground">Question not found</CardTitle>
-            <CardDescription className="text-sm text-muted-foreground">
-              We couldn’t locate that saved session. It may have been cleared from your browser storage.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-3">
-            <Button asChild>
-              <Link href="/questions">Return to Question Lab</Link>
-            </Button>
-            <Button asChild variant="outline" className="border-border/60">
-              <Link href="/dashboard">Go to dashboard</Link>
-            </Button>
-          </CardContent>
-        </Card>
       )}
     </div>
   );

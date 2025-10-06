@@ -1,11 +1,26 @@
+import { z } from "zod";
+
+export const workingStepSchema = z.object({
+  step: z.number(),
+  explanation: z.string(),
+  formula: z.string(),
+});
+
+export const generateMathProblemOutputWorkingSchema = z.array(workingStepSchema);
+
+export type WorkingStep = z.infer<typeof workingStepSchema>;
+
 export type Score = {
   correct: number;
   total: number;
 };
 
 export type ProblemSubmission = {
-  user_answer: number;
-  is_correct: boolean;
+  id: string;
+  created_at: string;
+  user_answer: string;
+  feedback?: string | null;
+  is_correct: boolean | null;
 };
 
 export type ProblemHistoryEntry = {
@@ -16,3 +31,34 @@ export type ProblemHistoryEntry = {
 };
 
 export type ProblemHistory = ProblemHistoryEntry[];
+
+export type MathSessionSummary = {
+  id: string;
+  createdAt: string;
+  config: {
+    primary: string;
+    topic: string;
+    difficulty: "easy" | "medium" | "hard";
+  };
+  problem: string;
+  answer: string;
+  working: WorkingStep[];
+  hint: string | null;
+  latestSubmission: {
+    id: string;
+    createdAt: string;
+    userAnswer: string;
+    feedback: string | null;
+    isCorrect: boolean | null;
+  } | null;
+};
+
+export type MathSessionDetail = MathSessionSummary & {
+  submissions: {
+    id: string;
+    createdAt: string;
+    userAnswer: string;
+    feedback: string | null;
+    isCorrect: boolean | null;
+  }[];
+};

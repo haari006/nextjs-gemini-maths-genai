@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
 
-import { RichAnswerEditor } from "@/components/rich-answer-editor";
 import { WorkingCanvas } from "@/components/working-canvas";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,11 +20,12 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import type { GenerateMathProblemOutput } from "@/ai/flows/generate-math-problems";
-import { loadHistory, saveHistory, StoredQuestionSession } from "@/lib/history-storage";
 import { PrimaryMathematicsSyllabus } from "@/lib/syllabus";
 import { cn } from "@/lib/utils";
+import type { MathSessionSummary } from "@/types/math";
 import { MathText } from "./math-text";
 
 const generationSchema = z.object({
@@ -36,12 +36,13 @@ const generationSchema = z.object({
 
 type PrimaryLevel = keyof typeof PrimaryMathematicsSyllabus;
 
-function createSessionId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+type SessionResponse = {
+  session: MathSessionSummary;
+};
+
+type SessionsResponse = {
+  sessions: MathSessionSummary[];
+};
 
 function stripHtml(input: string) {
   return input
@@ -115,8 +116,8 @@ export default function MathBuddyClient() {
 
   const [topics, setTopics] = useState<string[]>([]);
   const [mode, setMode] = useState<"form" | "question">("form");
-  const [history, setHistory] = useState<StoredQuestionSession[]>([]);
-  const historyHydrated = useRef(false);
+  const [history, setHistory] = useState<MathSessionSummary[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const currentSession = useMemo(
     () => history.find((entry) => entry.id === currentSessionId) ?? null,
@@ -139,16 +140,24 @@ export default function MathBuddyClient() {
   const allPrimaryLevels = useMemo(() => Object.keys(PrimaryMathematicsSyllabus) as PrimaryLevel[], []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = loadHistory();
-    setHistory(stored);
-    historyHydrated.current = true;
-  }, []);
+    const loadHistory = async () => {
+      try {
+        setIsHistoryLoading(true);
+        const response = await fetch("/api/math-sessions?limit=25");
+        if (!response.ok) {
+          throw new Error("Unable to load saved sessions.");
+        }
+        const data: SessionsResponse = await response.json();
+        setHistory(data.sessions ?? []);
+      } catch (error) {
+        console.warn(error);
+      } finally {
+        setIsHistoryLoading(false);
+      }
+    };
 
-  useEffect(() => {
-    if (!historyHydrated.current) return;
-    saveHistory(history);
-  }, [history]);
+    void loadHistory();
+  }, []);
 
   useEffect(() => {
     if (!currentSession) {
@@ -159,10 +168,11 @@ export default function MathBuddyClient() {
       return;
     }
 
-    setAnswerValue(currentSession.userAnswerText ?? currentSession.userAnswerHtml ?? "");
+    setMode("question");
+    setAnswerValue(currentSession.latestSubmission?.userAnswer ?? "");
     setHint(currentSession.hint ?? null);
-    setFeedback(currentSession.feedback ?? null);
-    setHasChecked(Boolean(currentSession.feedback));
+    setFeedback(currentSession.latestSubmission?.feedback ?? null);
+    setHasChecked(Boolean(currentSession.latestSubmission?.feedback));
   }, [currentSession]);
 
   const updateTopics = useCallback(
@@ -200,12 +210,26 @@ export default function MathBuddyClient() {
     try {
       const module = await import("canvas-confetti");
       const confetti = module.default;
-      confetti({
-        spread: 75,
-        particleCount: 160,
-        origin: { y: 0.3 },
-        scalar: 0.9,
-      });
+      const burst = () =>
+        confetti({
+          spread: 70,
+          particleCount: 160,
+          origin: { y: 0.3 },
+          scalar: 0.9,
+          colors: ["#2563eb", "#0ea5e9", "#facc15", "#22c55e"],
+          disableForReducedMotion: true,
+        });
+      burst();
+      setTimeout(() => {
+        confetti({
+          spread: 55,
+          particleCount: 120,
+          origin: { y: 0.4 },
+          scalar: 0.75,
+          colors: ["#2563eb", "#a855f7", "#fb7185"],
+          disableForReducedMotion: true,
+        });
+      }, 220);
     } catch (error) {
       console.warn("Unable to launch confetti", error);
     }
@@ -230,33 +254,50 @@ export default function MathBuddyClient() {
     []
   );
 
-  const startSession = useCallback(
-    (generated: GenerateMathProblemOutput, values: z.infer<typeof generationSchema>) => {
-      const session: StoredQuestionSession = {
-        id: createSessionId(),
-        createdAt: new Date().toISOString(),
-        config: values,
-        problem: generated.problem,
-        answer: generated.answer,
-        working: generated.working,
-      };
+  const createSession = useCallback(
+    async (generated: GenerateMathProblemOutput, values: z.infer<typeof generationSchema>) => {
+      const response = await fetch("/api/math-sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          config: values,
+          problem: generated.problem,
+          answer: generated.answer,
+          working: generated.working,
+        }),
+      });
 
-      setHistory((previous) => [session, ...previous]);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Unable to save the generated question.");
+      }
+
+      const data: SessionResponse = await response.json();
+      return data.session;
+    },
+    []
+  );
+
+  const startSession = useCallback(
+    (session: MathSessionSummary, values: z.infer<typeof generationSchema>) => {
+      setHistory((previous) => [session, ...previous.filter((entry) => entry.id !== session.id)]);
       setCurrentSessionId(session.id);
       setMode("question");
       setAnswerValue("");
-      setHint(null);
-      setFeedback(null);
-      setHasChecked(false);
+      setHint(session.hint);
+      setFeedback(session.latestSubmission?.feedback ?? null);
+      setHasChecked(Boolean(session.latestSubmission?.feedback));
+      generationForm.reset(values);
     },
-    []
+    [generationForm]
   );
 
   const onGenerate = generationForm.handleSubmit(async (values) => {
     try {
       setIsGenerating(true);
       const generated = await fetchProblem(values);
-      startSession(generated, values);
+      const session = await createSession(generated, values);
+      startSession(session, values);
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -270,9 +311,9 @@ export default function MathBuddyClient() {
 
   const handleCheckAnswer = async () => {
     if (!currentSession) return;
-    const answerText = toPlainText(answerValue);
+    const plainAnswer = toPlainText(answerValue);
 
-    if (!answerText) {
+    if (!plainAnswer) {
       toast({
         variant: "destructive",
         title: "Add your answer",
@@ -283,12 +324,12 @@ export default function MathBuddyClient() {
 
     try {
       setIsChecking(true);
-      const response = await fetch("/api/provide-feedback", {
+      const response = await fetch(`/api/math-sessions/${currentSession.id}/submissions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           problem: currentSession.problem,
-          studentAnswer: answerText,
+          studentAnswer: answerValue,
           correctAnswer: currentSession.answer,
         }),
       });
@@ -298,27 +339,22 @@ export default function MathBuddyClient() {
         throw new Error(errorData.error || "Unable to check the answer right now.");
       }
 
-      const { feedback: feedbackText } = await response.json();
-      const correct = answersMatch(currentSession.answer, answerText);
+      const data: { submission: NonNullable<MathSessionSummary["latestSubmission"]> } = await response.json();
 
-      setFeedback(feedbackText);
+      setFeedback(data.submission.feedback ?? null);
       setHasChecked(true);
-
       setHistory((entries) =>
         entries.map((entry) =>
           entry.id === currentSession.id
             ? {
                 ...entry,
-                userAnswerHtml: undefined,
-                userAnswerText: answerText,
-                feedback: feedbackText,
-                isCorrect: correct,
+                latestSubmission: data.submission,
               }
             : entry
         )
       );
 
-      if (correct) {
+      if (data.submission.isCorrect || answersMatch(currentSession.answer, plainAnswer)) {
         void triggerConfetti();
       }
     } catch (error: any) {
@@ -356,6 +392,12 @@ export default function MathBuddyClient() {
       setHistory((entries) =>
         entries.map((entry) => (entry.id === currentSession.id ? { ...entry, hint: hintText } : entry))
       );
+
+      void fetch(`/api/math-sessions/${currentSession.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hint: hintText }),
+      });
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -386,7 +428,8 @@ export default function MathBuddyClient() {
     try {
       setIsGeneratingSimilar(true);
       const generated = await fetchProblem(currentSession.config);
-      startSession(generated, currentSession.config);
+      const session = await createSession(generated, currentSession.config);
+      startSession(session, currentSession.config);
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -455,7 +498,7 @@ export default function MathBuddyClient() {
                         <Select onValueChange={field.onChange} value={field.value}>
                           <FormControl>
                             <SelectTrigger aria-label="Select difficulty">
-                              <SelectValue placeholder="Choose difficulty" />
+                              <SelectValue placeholder="Select a difficulty" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
@@ -493,28 +536,37 @@ export default function MathBuddyClient() {
                     </FormItem>
                   )}
                 />
-                <Button type="submit" className="w-full sm:w-auto" disabled={isGenerating}>
-                  {isGenerating ? (
-                    <span className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Generating
-                    </span>
-                  ) : (
-                    "Generate question"
+                <div className="flex flex-wrap gap-3">
+                  <Button type="submit" disabled={isGenerating}>
+                    {isGenerating ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Generating
+                      </span>
+                    ) : (
+                      "Generate question"
+                    )}
+                  </Button>
+                  {isHistoryLoading && (
+                    <p className="text-sm text-muted-foreground">Loading recent history…</p>
                   )}
-                </Button>
+                </div>
               </form>
             </Form>
           </CardContent>
         </Card>
       )}
 
-      {mode === "question" && currentSession && (
+      {currentSession && (
         <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-lg font-semibold text-foreground">Your generated question</CardTitle>
-            <CardDescription className="text-sm text-muted-foreground">
-              {`Level ${currentSession.config.primary.replace(/([0-9]+)/, " $1")}`} · {formatTopicLabel(currentSession.config.topic)} ·
-              {` ${currentSession.config.difficulty.charAt(0).toUpperCase()}${currentSession.config.difficulty.slice(1)}`}
+          <CardHeader className="space-y-2">
+            <CardTitle className="text-lg font-semibold text-foreground">Generated question</CardTitle>
+            <CardDescription className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <Badge variant="outline" className="rounded-full border px-3 py-1 text-xs font-semibold text-primary">
+                {currentSession.config.difficulty.toUpperCase()}
+              </Badge>
+              <span>
+                {`Level ${currentSession.config.primary.replace(/([0-9]+)/, " $1")}`} · {formatTopicLabel(currentSession.config.topic)}
+              </span>
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6 text-base text-foreground">
@@ -522,10 +574,11 @@ export default function MathBuddyClient() {
               <MathText text={currentSession.problem} />
             </div>
             <div className="space-y-4">
-              <RichAnswerEditor
+              <Textarea
                 value={answerValue}
-                onChange={setAnswerValue}
+                onChange={(event) => setAnswerValue(event.target.value)}
                 placeholder="Describe your steps and final answer here."
+                rows={6}
               />
               <div className="flex flex-wrap gap-3">
                 <Button type="button" onClick={handleCheckAnswer} disabled={isChecking}>
@@ -567,25 +620,25 @@ export default function MathBuddyClient() {
         <Card ref={feedbackSectionRef} className="rounded-2xl border border-border/60 bg-white shadow-sm">
           <CardHeader className="space-y-2">
             <div className="flex items-center gap-2">
-              <Info
-                className={cn(
-                  "h-5 w-5",
-                  currentSession.isCorrect ? "text-primary" : "text-destructive"
-                )}
-                aria-hidden
-              />
+              <Info className="h-5 w-5 text-primary" aria-hidden />
               <CardTitle className="text-lg font-semibold text-foreground">Feedback</CardTitle>
             </div>
             <CardDescription className="text-sm text-muted-foreground">
-              {currentSession.isCorrect ? "Great job!" : "Here's how you can improve your approach next time."}
+              {currentSession.latestSubmission?.isCorrect
+                ? "Great job!"
+                : "Here's how you can improve your approach next time."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <p className="rounded-2xl border border-border/40 bg-muted/20 p-4 text-sm text-foreground/90">{feedback}</p>
+            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-primary">
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary/80">Final answer</p>
+              <p className="mt-1 text-base font-semibold text-primary">{currentSession.answer}</p>
+            </div>
             {currentSession.working.length > 0 && (
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-muted-foreground">Answer working (auto-rendered)</h3>
-                <WorkingCanvas working={currentSession.working} />
+                <WorkingCanvas working={currentSession.working} finalAnswer={currentSession.answer} />
               </div>
             )}
           </CardContent>
@@ -623,40 +676,40 @@ export default function MathBuddyClient() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {history.map((entry) => (
-                <Link
-                  key={entry.id}
-                  href={`/question/${entry.id}`}
-                  className={cn(
-                    "group block rounded-2xl border border-border/50 bg-white/90 p-4 shadow-sm transition hover:border-primary/40 hover:bg-primary/5",
-                    currentSessionId === entry.id && "border-primary/50"
-                  )}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(entry.createdAt).toLocaleString()}
+              {history.map((entry) => {
+                const statusLabel = entry.latestSubmission
+                  ? entry.latestSubmission.isCorrect
+                    ? "Correct"
+                    : "Needs review"
+                  : "Awaiting check";
+                const statusClass = entry.latestSubmission
+                  ? entry.latestSubmission.isCorrect
+                    ? "border-primary/30 bg-primary/10 text-primary"
+                    : "border-destructive/30 bg-destructive/10 text-destructive"
+                  : "border-border/60 bg-muted/40 text-muted-foreground";
+                return (
+                  <Link
+                    key={entry.id}
+                    href={`/question/${entry.id}`}
+                    className={cn(
+                      "group block rounded-2xl border border-border/50 bg-white/90 p-4 shadow-sm transition hover:border-primary/40 hover:bg-primary/5",
+                      currentSessionId === entry.id && "border-primary/50"
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(entry.createdAt).toLocaleString()}
+                      </p>
+                      <Badge variant="outline" className={cn("rounded-full border px-3 py-1 text-xs font-semibold", statusClass)}>
+                        {statusLabel}
+                      </Badge>
+                    </div>
+                    <p className="mt-3 text-sm font-medium text-foreground/90">
+                      {summarizeProblem(entry.problem)}
                     </p>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "rounded-full border border-border/60 px-3 py-1 text-[11px] font-semibold",
-                        entry.isCorrect === undefined
-                          ? "bg-muted/40 text-muted-foreground"
-                          : entry.isCorrect
-                          ? "border-primary/30 bg-primary/10 text-primary"
-                          : "border-destructive/30 bg-destructive/10 text-destructive"
-                      )}
-                    >
-                      {entry.isCorrect === undefined
-                        ? "Awaiting check"
-                        : entry.isCorrect
-                        ? "Correct"
-                        : "Review again"}
-                    </Badge>
-                  </div>
-                  <p className="mt-2 line-clamp-2 text-sm text-foreground/90">{summarizeProblem(entry.problem)}</p>
-                </Link>
-              ))}
+                  </Link>
+                );
+              })}
             </div>
           </CardContent>
         </Card>

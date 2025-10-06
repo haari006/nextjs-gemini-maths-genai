@@ -3,7 +3,26 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { supabase } from "@/lib/supabase-client";
-import type { ProblemHistory, Score } from "@/types/math";
+import type { ProblemHistory, ProblemHistoryEntry, ProblemSubmission, Score } from "@/types/math";
+
+function mapSubmission(raw: any): ProblemSubmission {
+  return {
+    id: raw.id,
+    created_at: raw.created_at,
+    user_answer: raw.user_answer,
+    feedback: raw.feedback ?? null,
+    is_correct: raw.is_correct ?? null,
+  };
+}
+
+function mapHistoryEntry(raw: any): ProblemHistoryEntry {
+  return {
+    id: raw.id,
+    created_at: raw.created_at,
+    problem_text: raw.problem_text,
+    submissions: Array.isArray(raw.submissions) ? raw.submissions.map(mapSubmission) : [],
+  };
+}
 
 export function useMathProgress() {
   const [score, setScore] = useState<Score>({ correct: 0, total: 0 });
@@ -31,7 +50,10 @@ export function useMathProgress() {
           created_at,
           problem_text,
           submissions:math_problem_submissions (
+            id,
+            created_at,
             user_answer,
+            feedback,
             is_correct
           )
         `
@@ -40,7 +62,7 @@ export function useMathProgress() {
       .limit(20);
 
     if (!historyError && historyData) {
-      setHistory(historyData as ProblemHistory);
+      setHistory(historyData.map(mapHistoryEntry));
     }
 
     setLoading(false);

@@ -27,16 +27,52 @@ function latexToReadable(formula: string) {
     .replace(/\\^/g, "^");
 }
 
+const superscriptMap: Record<string, string> = {
+  "0": "⁰",
+  "1": "¹",
+  "2": "²",
+  "3": "³",
+  "4": "⁴",
+  "5": "⁵",
+  "6": "⁶",
+  "7": "⁷",
+  "8": "⁸",
+  "9": "⁹",
+  "+": "⁺",
+  "-": "⁻",
+  "=": "⁼",
+  "(": "⁽",
+  ")": "⁾",
+  "n": "ⁿ",
+  "i": "ⁱ",
+};
+
+function toSuperscript(value: string) {
+  return value
+    .split("")
+    .map((char) => superscriptMap[char] ?? char)
+    .join("");
+}
+
+function applyPowers(text: string) {
+  return text.replace(/\^(\{([^}]*)\}|(\S+))/g, (_match, group, bracketed, single) => {
+    const target = (bracketed ?? single ?? "").replace(/[{}]/g, "");
+    return toSuperscript(target);
+  });
+}
+
 function sanitizeFormula(formula: string) {
-  return latexToReadable(
-    formula
-      .replace(/\\\\/g, " ")
-      .replace(/\\n/g, " ")
-      .replace(/\$+/g, "")
-      .replace(/\{\}/g, "")
-      .replace(/\\text\{([^}]*)\}/g, "$1")
-      .replace(/\s+/g, " ")
-      .trim()
+  return applyPowers(
+    latexToReadable(
+      formula
+        .replace(/\\\\/g, " ")
+        .replace(/\\n/g, " ")
+        .replace(/\$+/g, "")
+        .replace(/\{\}/g, "")
+        .replace(/\\text\{([^}]*)\}/g, "$1")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
   );
 }
 
@@ -74,7 +110,11 @@ function wrapText(
   return currentY;
 }
 
-function estimateHeight(working: GenerateMathProblemOutput["working"], maxWidth: number, lineHeight: number) {
+function estimateHeight(
+  working: GenerateMathProblemOutput["working"],
+  maxWidth: number,
+  lineHeight: number
+) {
   return working.reduce((height, step) => {
     const explanationLength = Math.max(Math.ceil(step.explanation.length / (maxWidth / 10)), 1);
     const formulaLength = Math.max(Math.ceil(sanitizeFormula(step.formula).length / (maxWidth / 12)), 1);
@@ -82,7 +122,13 @@ function estimateHeight(working: GenerateMathProblemOutput["working"], maxWidth:
   }, 0);
 }
 
-export function WorkingCanvas({ working }: { working: GenerateMathProblemOutput["working"] }) {
+export function WorkingCanvas({
+  working,
+  finalAnswer,
+}: {
+  working: GenerateMathProblemOutput["working"];
+  finalAnswer?: string;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const renderCanvas = useCallback(
@@ -97,7 +143,7 @@ export function WorkingCanvas({ working }: { working: GenerateMathProblemOutput[
       const basePadding = 24;
       const maxWidth = Math.max(containerWidth - basePadding * 2, 260);
       const estimatedContentHeight = estimateHeight(working, maxWidth, lineHeight);
-      const height = Math.max(220, estimatedContentHeight + basePadding * 2);
+      const height = Math.max(260, estimatedContentHeight + basePadding * 3);
 
       const devicePixelRatio = window.devicePixelRatio || 1;
       canvas.width = containerWidth * devicePixelRatio;
@@ -144,8 +190,32 @@ export function WorkingCanvas({ working }: { working: GenerateMathProblemOutput[
 
         currentY += lineHeight / 2;
       }
+
+      if (finalAnswer) {
+        currentY += lineHeight;
+        context.font = "14px 'Nunito', sans-serif";
+        currentY = wrapText(
+          context,
+          "Final answer:",
+          basePadding,
+          currentY,
+          maxWidth,
+          lineHeight,
+          "#475569"
+        );
+        context.font = "20px 'Baloo 2', 'Nunito', sans-serif";
+        wrapText(
+          context,
+          sanitizeFormula(finalAnswer),
+          basePadding + 12,
+          currentY,
+          maxWidth,
+          lineHeight,
+          "#1d4ed8"
+        );
+      }
     },
-    [working]
+    [working, finalAnswer]
   );
 
   useEffect(() => {
@@ -180,5 +250,12 @@ export function WorkingCanvas({ working }: { working: GenerateMathProblemOutput[
     return () => window.removeEventListener("resize", resizeListener);
   }, [renderCanvas]);
 
-  return <canvas ref={canvasRef} className="w-full rounded-2xl border border-border/60 shadow-sm" role="img" aria-label="Answer working steps" />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className="w-full rounded-2xl border border-border/60 shadow-sm"
+      role="img"
+      aria-label="Answer working steps"
+    />
+  );
 }

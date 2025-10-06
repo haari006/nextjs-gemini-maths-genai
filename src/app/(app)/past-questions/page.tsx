@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { loadHistory, StoredQuestionSession } from "@/lib/history-storage";
 import { cn } from "@/lib/utils";
+import type { MathSessionSummary } from "@/types/math";
 
 const statusFilters = [
   { value: "all", label: "All statuses" },
@@ -21,6 +21,10 @@ type StatusFilter = (typeof statusFilters)[number]["value"];
 
 type DifficultyFilter = "all" | "easy" | "medium" | "hard";
 
+type SessionsResponse = {
+  sessions: MathSessionSummary[];
+};
+
 function formatTopicLabel(topic: string) {
   return topic.replace(/([A-Z])/g, " $1").replace(/\s+/g, " ").trim();
 }
@@ -29,39 +33,49 @@ function summarizeProblem(problem: string) {
   return problem.replace(/\$[^$]*\$/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function statusBadge(entry: StoredQuestionSession) {
-  if (entry.isCorrect === undefined) {
+function statusBadge(entry: MathSessionSummary) {
+  if (!entry.latestSubmission) {
     return { label: "Awaiting check", className: "border-border/60 bg-muted/40 text-muted-foreground" };
   }
 
-  return entry.isCorrect
+  return entry.latestSubmission.isCorrect
     ? { label: "Correct", className: "border-primary/30 bg-primary/10 text-primary" }
     : { label: "Needs review", className: "border-destructive/30 bg-destructive/10 text-destructive" };
 }
 
 export default function PastQuestionsPage() {
-  const [history, setHistory] = useState<StoredQuestionSession[]>([]);
+  const [history, setHistory] = useState<MathSessionSummary[]>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [difficultyFilter, setDifficultyFilter] = useState<DifficultyFilter>("all");
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setHistory(loadHistory());
+  const fetchHistory = useCallback(async (status: StatusFilter, difficulty: DifficultyFilter) => {
+    const params = new URLSearchParams();
+    params.set("status", status);
+    params.set("difficulty", difficulty);
+    params.set("limit", "100");
+
+    try {
+      setLoading(true);
+      const response = await fetch(`/api/math-sessions?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error("Unable to fetch history");
+      }
+      const data: SessionsResponse = await response.json();
+      setHistory(data.sessions ?? []);
+    } catch (error) {
+      console.warn(error);
+      setHistory([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const filteredHistory = useMemo(() => {
-    return history.filter((entry) => {
-      const statusMatches =
-        statusFilter === "all" ||
-        (statusFilter === "pending" && entry.isCorrect === undefined) ||
-        (statusFilter === "correct" && entry.isCorrect === true) ||
-        (statusFilter === "incorrect" && entry.isCorrect === false);
+  useEffect(() => {
+    void fetchHistory(statusFilter, difficultyFilter);
+  }, [statusFilter, difficultyFilter, fetchHistory]);
 
-      const difficultyMatches = difficultyFilter === "all" || entry.config.difficulty === difficultyFilter;
-
-      return statusMatches && difficultyMatches;
-    });
-  }, [history, statusFilter, difficultyFilter]);
+  const filteredHistory = useMemo(() => history, [history]);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
@@ -99,7 +113,11 @@ export default function PastQuestionsPage() {
             <label htmlFor="status-filter" className="text-sm font-medium text-muted-foreground">
               Status
             </label>
-            <Select value={statusFilter} onValueChange={(value: StatusFilter) => setStatusFilter(value)}>
+            <Select
+              value={statusFilter}
+              onValueChange={(value: StatusFilter) => setStatusFilter(value)}
+              disabled={loading}
+            >
               <SelectTrigger id="status-filter" className="border-border/60">
                 <SelectValue placeholder="Choose status" />
               </SelectTrigger>
@@ -116,7 +134,11 @@ export default function PastQuestionsPage() {
             <label htmlFor="difficulty-filter" className="text-sm font-medium text-muted-foreground">
               Difficulty
             </label>
-            <Select value={difficultyFilter} onValueChange={(value: DifficultyFilter) => setDifficultyFilter(value)}>
+            <Select
+              value={difficultyFilter}
+              onValueChange={(value: DifficultyFilter) => setDifficultyFilter(value)}
+              disabled={loading}
+            >
               <SelectTrigger id="difficulty-filter" className="border-border/60">
                 <SelectValue placeholder="Choose difficulty" />
               </SelectTrigger>
@@ -131,7 +153,19 @@ export default function PastQuestionsPage() {
         </CardContent>
       </Card>
 
-      {filteredHistory.length === 0 ? (
+      {loading ? (
+        <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold text-foreground">Loading past questions…</CardTitle>
+            <CardDescription className="text-sm text-muted-foreground">
+              Fetching your saved sessions from Supabase.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-32 animate-pulse rounded-2xl bg-muted/40" />
+          </CardContent>
+        </Card>
+      ) : filteredHistory.length === 0 ? (
         <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
           <CardHeader>
             <CardTitle className="text-lg font-semibold text-foreground">No saved questions</CardTitle>
