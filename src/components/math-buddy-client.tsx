@@ -1,32 +1,14 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AnimatePresence, motion } from "framer-motion";
-import {
-  BrainCircuit,
-  CheckCircle2,
-  HelpCircle,
-  History,
-  Lightbulb,
-  Loader2,
-  Sparkles,
-  XCircle,
-} from "lucide-react";
-import * as React from "react";
-import { useCallback, useEffect, useState } from "react";
+import { ChevronDown, History, Info, Loader2, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
-import { BlockMath } from "react-katex";
 import * as z from "zod";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import type { GenerateMathProblemOutput } from "@/ai/flows/generate-math-problems";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -37,6 +19,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Form,
   FormControl,
   FormField,
@@ -44,7 +31,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
   SelectContent,
@@ -52,145 +39,313 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { WorkingCanvas } from "@/components/working-canvas";
 import { useToast } from "@/hooks/use-toast";
-
-import type { GenerateMathProblemOutput } from "@/ai/flows/generate-math-problems";
-import { supabase } from "@/lib/supabase-client";
+import {
+  GEMINI_MODEL_VALUES,
+  type GeminiModelValue,
+} from "@/lib/gemini-models";
 import { PrimaryMathematicsSyllabus } from "@/lib/syllabus";
+import { cn } from "@/lib/utils";
+import type { MathSessionSummary } from "@/types/math";
 import { MathText } from "./math-text";
 
+const questionTypeValues = ["subjective", "multipleChoice"] as const;
+const questionTypeOptions = [
+  { value: "subjective", label: "Subjective" },
+  { value: "multipleChoice", label: "Multiple choice" },
+] as const;
+
 const generationSchema = z.object({
-  primary: z.string({ required_error: "Please select a primary level." }),
-  topic: z.string({ required_error: "Please select a topic." }),
+  primary: z.string({ required_error: "Select a level." }),
+  topic: z.string({ required_error: "Select a topic." }),
   difficulty: z.enum(["easy", "medium", "hard"]),
+  questionType: z.enum(questionTypeValues),
+  model: z.enum(GEMINI_MODEL_VALUES),
 });
 
-const answerSchema = z.object({
-  answer: z.string().min(1, "Please enter an answer."),
-});
+const defaultGenerationValues: z.infer<typeof generationSchema> = {
+  primary: "Primary5",
+  topic: "",
+  difficulty: "easy",
+  questionType: "subjective",
+  model: GEMINI_MODEL_VALUES[0],
+};
 
-type GameState = "idle" | "generating" | "solving" | "checking" | "feedback";
 type PrimaryLevel = keyof typeof PrimaryMathematicsSyllabus;
-type Score = { correct: number; total: number };
-type ProblemHistory = {
-  id: string;
-  created_at: string;
-  problem_text: string;
-  submissions: {
-    user_answer: number;
-    is_correct: boolean;
-  }[];
-}[];
+
+type SessionResponse = {
+  session: MathSessionSummary;
+};
+
+type SessionsResponse = {
+  sessions: MathSessionSummary[];
+};
+
+function hasCompleteConfig(config: MathSessionSummary["config"]) {
+  return Boolean(config.primary && config.topic && config.difficulty);
+}
+
+function stripHtml(input: string) {
+  return input
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .trim();
+}
+
+function toPlainText(input: string) {
+  return stripHtml(input).replace(/\s+/g, " ").trim();
+}
+
+function parseNumericAnswer(value: string) {
+  const cleaned = value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/,/g, "")
+    .replace(/[a-zA-Z%°]+/g, (segment) =>
+      /(cm|mm|m|km|g|kg|l|ml|°C|°F)/i.test(segment) ? "" : " "
+    )
+    .trim();
+  if (!cleaned) {
+    return null;
+  }
+
+  const fractionMatch = cleaned.match(
+    /^(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)/
+  );
+  if (fractionMatch) {
+    const numerator = parseFloat(fractionMatch[1]);
+    const denominator = parseFloat(fractionMatch[2]);
+    if (
+      !Number.isNaN(numerator) &&
+      !Number.isNaN(denominator) &&
+      denominator !== 0
+    ) {
+      return numerator / denominator;
+    }
+  }
+
+  const percentMatch = cleaned.match(/^(-?\d+(?:\.\d+)?)\s*%$/);
+  if (percentMatch) {
+    const numeric = parseFloat(percentMatch[1]);
+    if (!Number.isNaN(numeric)) {
+      return numeric / 100;
+    }
+  }
+
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function answersMatch(correctAnswer: string, studentAnswer: string) {
+  const plainCorrect = toPlainText(correctAnswer).toLowerCase();
+  const plainStudent = toPlainText(studentAnswer).toLowerCase();
+
+  const numericCorrect = parseNumericAnswer(plainCorrect);
+  const numericStudent = parseNumericAnswer(plainStudent);
+
+  if (numericCorrect !== null && numericStudent !== null) {
+    return Math.abs(numericCorrect - numericStudent) < 0.001;
+  }
+
+  return plainCorrect === plainStudent;
+}
+
+function summarizeProblem(problem: string) {
+  return problem
+    .replace(/\$[^$]*\$/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 export default function MathBuddyClient() {
-  const [gameState, setGameState] = useState<GameState>("idle");
-  const [problem, setProblem] = useState<GenerateMathProblemOutput | null>(
-    null
-  );
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{
-    isCorrect: boolean;
-    text: string | null;
-  } | null>(null);
-  const [topics, setTopics] = useState<string[]>([]);
-  const [showAnswer, setShowAnswer] = useState(false);
-  const [score, setScore] = useState<Score>({ correct: 0, total: 0 });
-  const [history, setHistory] = useState<ProblemHistory>([]);
-  const [showHistorySheet, setShowHistorySheet] = useState(false);
-  const [hint, setHint] = useState<string | null>(null);
-  const [showHintDialog, setShowHintDialog] = useState(false);
-  const [isFetchingHint, setIsFetchingHint] = useState(false);
   const { toast } = useToast();
-
   const generationForm = useForm<z.infer<typeof generationSchema>>({
     resolver: zodResolver(generationSchema),
-    defaultValues: {
-      difficulty: "easy",
-    },
+    defaultValues: defaultGenerationValues,
   });
 
-  const answerForm = useForm<z.infer<typeof answerSchema>>({
-    resolver: zodResolver(answerSchema),
-  });
+  const [topics, setTopics] = useState<string[]>([]);
+  const [mode, setMode] = useState<"form" | "question">("form");
+  const [history, setHistory] = useState<MathSessionSummary[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const currentSession = useMemo(
+    () => history.find((entry) => entry.id === currentSessionId) ?? null,
+    [history, currentSessionId]
+  );
+  const [answerValue, setAnswerValue] = useState("");
+  const [hint, setHint] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [hasChecked, setHasChecked] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
+  const [isHintLoading, setIsHintLoading] = useState(false);
+  const [isGeneratingSimilar, setIsGeneratingSimilar] = useState(false);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
+  const [selectedChoiceLabel, setSelectedChoiceLabel] = useState<string>("");
+  const feedbackSectionRef = useRef<HTMLDivElement | null>(null);
 
-  const fetchScoreAndHistory = useCallback(async () => {
-    const { data: submissions, error: submissionsError } = await supabase
-      .from("math_problem_submissions")
-      .select("is_correct");
-
-    if (submissionsError) {
-      console.error("Error fetching score:", submissionsError);
-    } else {
-      const correct = submissions.filter((s) => s.is_correct).length;
-      const total = submissions.length;
-      setScore({ correct, total });
-    }
-
-    const { data: historyData, error: historyError } = await supabase
-      .from("math_problem_sessions")
-      .select(
-        `
-            id,
-            created_at,
-            problem_text,
-            submissions:math_problem_submissions (
-                user_answer,
-                is_correct
-            )
-        `
-      )
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    if (historyError) {
-      console.error("Error fetching history:", historyError);
-    } else {
-      setHistory(historyData as ProblemHistory);
-    }
+  const formatTopicLabel = useCallback((topic: string) => {
+    return topic
+      .replace(/([A-Z])/g, " $1")
+      .replace(/\s+/g, " ")
+      .trim();
   }, []);
 
-  const handlePrimaryLevelChange = useCallback(
-    (value: string) => {
-      const level = value as PrimaryLevel;
-      if (level && PrimaryMathematicsSyllabus[level]) {
-        const syllabus = PrimaryMathematicsSyllabus[level] as Record<
-          string,
-          Record<string, unknown>
-        >;
-        // Collect topic groups across all sections (e.g., NumberAndAlgebra, MeasurementAndGeometry, Statistics)
-        const allTopics = Object.values(syllabus).flatMap((section) =>
-          Object.keys(section ?? {})
-        );
-        setTopics(allTopics);
-      } else {
-        setTopics([]);
+  const allPrimaryLevels = useMemo(
+    () => Object.keys(PrimaryMathematicsSyllabus) as PrimaryLevel[],
+    []
+  );
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        setIsHistoryLoading(true);
+        const response = await fetch("/api/math-sessions?limit=25");
+        if (!response.ok) {
+          throw new Error("Unable to load saved sessions.");
+        }
+        const data: SessionsResponse = await response.json();
+        setHistory(data.sessions ?? []);
+      } catch (error) {
+        console.warn(error);
+      } finally {
+        setIsHistoryLoading(false);
       }
-      generationForm.setValue("topic", "");
-      generationForm.setValue("primary", value);
+    };
+
+    void loadHistory();
+  }, []);
+
+  useEffect(() => {
+    if (!currentSession) {
+      setAnswerValue("");
+      setHint(null);
+      setFeedback(null);
+      setHasChecked(false);
+      setSelectedChoiceId(null);
+      setSelectedChoiceLabel("");
+      return;
+    }
+
+    setMode("question");
+    const questionType = currentSession.config.questionType ?? "subjective";
+    if (questionType === "multipleChoice") {
+      const latestAnswer = currentSession.latestSubmission?.userAnswer ?? "";
+      const matchedChoice = currentSession.choices.find(
+        (choice) =>
+          choice.id === latestAnswer ||
+          choice.label.trim().toLowerCase() ===
+            latestAnswer.trim().toLowerCase() ||
+          choice.value.trim() === latestAnswer.trim()
+      );
+      setSelectedChoiceId(matchedChoice ? matchedChoice.id : null);
+      setSelectedChoiceLabel(
+        matchedChoice ? matchedChoice.label : latestAnswer
+      );
+      setAnswerValue(matchedChoice ? matchedChoice.value : latestAnswer);
+    } else {
+      setSelectedChoiceId(null);
+      setSelectedChoiceLabel("");
+      setAnswerValue(currentSession.latestSubmission?.userAnswer ?? "");
+    }
+    setHint(currentSession.hint ?? null);
+    setFeedback(currentSession.latestSubmission?.feedback ?? null);
+    setHasChecked(Boolean(currentSession.latestSubmission?.feedback));
+  }, [currentSession]);
+
+  const updateTopics = useCallback(
+    (level: PrimaryLevel, resetTopic = true) => {
+      const syllabus = PrimaryMathematicsSyllabus[level] as Record<
+        string,
+        Record<string, unknown>
+      >;
+      const collectedTopics = Object.values(syllabus ?? {}).flatMap((section) =>
+        Object.keys(section ?? {})
+      );
+      setTopics(collectedTopics);
+      if (resetTopic) {
+        generationForm.setValue("topic", collectedTopics[0] ?? "");
+      } else if (
+        !generationForm.getValues("topic") &&
+        collectedTopics.length > 0
+      ) {
+        generationForm.setValue("topic", collectedTopics[0]);
+      }
     },
     [generationForm]
   );
 
   useEffect(() => {
-    handlePrimaryLevelChange("Primary5");
-    fetchScoreAndHistory();
-  }, [handlePrimaryLevelChange, fetchScoreAndHistory]);
+    const defaultPrimary = generationForm.getValues("primary") as PrimaryLevel;
+    if (!defaultPrimary) return;
+    updateTopics(defaultPrimary, false);
+  }, [generationForm, updateTopics]);
 
-  const handleGenerateProblem = async (
-    values: z.infer<typeof generationSchema>
-  ) => {
-    setGameState("generating");
-    setShowAnswer(false);
-    setHint(null);
+  const handlePrimaryLevelChange = useCallback(
+    (value: string) => {
+      const level = value as PrimaryLevel;
+      generationForm.setValue("primary", level);
+      updateTopics(level);
+    },
+    [generationForm, updateTopics]
+  );
+
+  const triggerConfetti = useCallback(async () => {
+    if (typeof window === "undefined") return;
+
     try {
+      const module = await import("canvas-confetti");
+      const confetti = module.default;
+      const burst = () =>
+        confetti({
+          spread: 70,
+          particleCount: 160,
+          origin: { y: 0.3 },
+          scalar: 0.9,
+          colors: ["#2563eb", "#0ea5e9", "#facc15", "#22c55e"],
+          disableForReducedMotion: true,
+        });
+      burst();
+      setTimeout(() => {
+        confetti({
+          spread: 55,
+          particleCount: 120,
+          origin: { y: 0.4 },
+          scalar: 0.75,
+          colors: ["#2563eb", "#a855f7", "#fb7185"],
+          disableForReducedMotion: true,
+        });
+      }, 220);
+    } catch (error) {
+      console.warn("Unable to launch confetti", error);
+    }
+  }, []);
+
+  const handleChoiceSelect = useCallback(
+    (choiceId: string) => {
+      setSelectedChoiceId(choiceId);
+      const choice = currentSession?.choices.find(
+        (entry) => entry.id === choiceId
+      );
+      if (choice) {
+        setSelectedChoiceLabel(choice.label);
+        setAnswerValue(choice.value);
+      } else {
+        setSelectedChoiceLabel("");
+        setAnswerValue("");
+      }
+    },
+    [currentSession]
+  );
+
+  const fetchProblem = useCallback(
+    async (values: z.infer<typeof generationSchema>) => {
       const response = await fetch("/api/generate-problem", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -198,435 +353,407 @@ export default function MathBuddyClient() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to generate problem.");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Unable to create a question.");
       }
 
       const generated: GenerateMathProblemOutput = await response.json();
-      setProblem(generated);
+      return generated;
+    },
+    []
+  );
 
-      const correctAnswer = parseFloat(generated.answer);
-      if (isNaN(correctAnswer)) {
-        throw new Error("The generated answer is not a valid number.");
-      }
-
-      const { data, error } = await supabase
-        .from("math_problem_sessions")
-        .insert({
-          problem_text: generated.problem,
-          correct_answer: correctAnswer,
-        })
-        .select("id")
-        .single();
-
-      if (error) throw error;
-      setSessionId(data.id);
-
-      setGameState("solving");
-      answerForm.reset();
-      setFeedback(null);
-    } catch (error: any) {
-      console.error("Failed to generate or save problem:", error);
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description:
-          error.message ||
-          "Could not generate a new problem. Please try again.",
-      });
-      setGameState("idle");
-    }
-  };
-
-  const handleCheckAnswer = async (values: z.infer<typeof answerSchema>) => {
-    if (!problem || !sessionId) return;
-    setGameState("checking");
-
-    const userAnswerStr = values.answer.trim();
-    const userAnswerNum = parseFloat(userAnswerStr);
-
-    if (isNaN(userAnswerNum)) {
-      toast({
-        variant: "destructive",
-        title: "Invalid Answer",
-        description: "Your answer must be a number.",
-      });
-      setGameState("solving");
-      return;
-    }
-
-    const correctAnswerNum = parseFloat(problem.answer);
-    const isCorrect = userAnswerNum === correctAnswerNum;
-
-    let feedbackText: string;
-
-    try {
-      const feedbackResponse = await fetch("/api/provide-feedback", {
+  const createSession = useCallback(
+    async (
+      generated: GenerateMathProblemOutput,
+      values: z.infer<typeof generationSchema>
+    ) => {
+      const response = await fetch("/api/math-sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          problem: problem.problem,
-          studentAnswer: userAnswerStr,
-          correctAnswer: problem.answer,
+          config: values,
+          problem: generated.problem,
+          answer: generated.answer,
+          working: generated.working,
+          choices: generated.choices,
         }),
       });
 
-      if (!feedbackResponse.ok) {
-        const errorData = await feedbackResponse.json();
-        throw new Error(errorData.error || "Failed to get feedback.");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          errorData.error || "Unable to save the generated question."
+        );
       }
 
-      const feedbackData = await feedbackResponse.json();
-      feedbackText = feedbackData.feedback;
+      const data: SessionResponse = await response.json();
+      return data.session;
+    },
+    []
+  );
 
-      setFeedback({ isCorrect, text: feedbackText });
+  const startSession = useCallback(
+    (session: MathSessionSummary, values: z.infer<typeof generationSchema>) => {
+      setHistory((previous) => [
+        session,
+        ...previous.filter((entry) => entry.id !== session.id),
+      ]);
+      setCurrentSessionId(session.id);
+      setMode("question");
+      setAnswerValue("");
+      setSelectedChoiceId(null);
+      setSelectedChoiceLabel("");
+      setHint(session.hint);
+      setFeedback(session.latestSubmission?.feedback ?? null);
+      setHasChecked(Boolean(session.latestSubmission?.feedback));
+      generationForm.reset(values);
+    },
+    [generationForm]
+  );
 
-      const { error } = await supabase.from("math_problem_submissions").insert({
-        session_id: sessionId,
-        user_answer: userAnswerNum,
-        is_correct: isCorrect,
-        feedback_text: feedbackText,
-      });
-      if (error) throw error;
+  const onGenerate = generationForm.handleSubmit(async (values) => {
+    try {
+      setIsGenerating(true);
+      const generated = await fetchProblem(values);
+      const session = await createSession(generated, values);
+      startSession(session, values);
     } catch (error: any) {
-      console.error("Failed to get feedback or save submission:", error);
       toast({
         variant: "destructive",
-        title: "AI Feedback Error",
-        description: "Could not get AI-powered feedback. Please try again.",
+        title: "Something went wrong",
+        description:
+          error?.message || "Please try generating a question again.",
       });
-      // Fallback to simple feedback if AI fails
-      const fallbackFeedback = isCorrect
-        ? "Well done! That's the correct answer."
-        : "That's not quite right. Have another look at the problem and try again!";
-      setFeedback({ isCorrect, text: fallbackFeedback });
     } finally {
-      setGameState("feedback");
-      fetchScoreAndHistory(); // Update score and history after submission
+      setIsGenerating(false);
+    }
+  });
+
+  const handleCheckAnswer = async () => {
+    if (!currentSession) return;
+    const questionType = currentSession.config.questionType ?? "subjective";
+    let submissionAnswer = answerValue;
+    let comparisonAnswer = toPlainText(answerValue);
+
+    if (
+      questionType === "multipleChoice" &&
+      currentSession.choices.length === 0
+    ) {
+      const plainAnswer = toPlainText(answerValue);
+      if (!plainAnswer) {
+        toast({
+          variant: "destructive",
+          title: "Add your answer",
+          description: "Type your final answer before checking.",
+        });
+        return;
+      }
+      submissionAnswer = answerValue;
+      comparisonAnswer = plainAnswer;
+    } else if (questionType === "multipleChoice") {
+      const activeChoice = currentSession.choices.find(
+        (choice) => choice.id === selectedChoiceId
+      );
+      if (!activeChoice) {
+        toast({
+          variant: "destructive",
+          title: "Select an option",
+          description: "Choose one of the answers before checking.",
+        });
+        return;
+      }
+      submissionAnswer = selectedChoiceLabel || activeChoice.label;
+      comparisonAnswer = activeChoice.value;
+    } else {
+      const plainAnswer = toPlainText(answerValue);
+      if (!plainAnswer) {
+        toast({
+          variant: "destructive",
+          title: "Add your answer",
+          description: "Type your working or final answer before checking.",
+        });
+        return;
+      }
+      comparisonAnswer = plainAnswer;
+    }
+
+    try {
+      setIsChecking(true);
+      const response = await fetch(
+        `/api/math-sessions/${currentSession.id}/submissions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            problem: currentSession.problem,
+            studentAnswer: submissionAnswer,
+            correctAnswer: currentSession.answer,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          errorData.error || "Unable to check the answer right now."
+        );
+      }
+
+      const data: {
+        submission: NonNullable<MathSessionSummary["latestSubmission"]>;
+      } = await response.json();
+
+      setFeedback(data.submission.feedback ?? null);
+      setHasChecked(true);
+      setHistory((entries) =>
+        entries.map((entry) =>
+          entry.id === currentSession.id
+            ? {
+                ...entry,
+                latestSubmission: data.submission,
+              }
+            : entry
+        )
+      );
+
+      if (
+        data.submission.isCorrect ||
+        answersMatch(currentSession.answer, comparisonAnswer)
+      ) {
+        void triggerConfetti();
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Unable to check answer",
+        description: error?.message || "Please try again in a moment.",
+      });
+    } finally {
+      setIsChecking(false);
     }
   };
 
-  const handleFetchHint = async () => {
-    if (!problem) return;
-    setIsFetchingHint(true);
-    setShowHintDialog(true);
+  const handleRequestHint = async () => {
+    if (!currentSession) return;
+
     try {
+      setIsHintLoading(true);
       const response = await fetch("/api/provide-hint", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          problem: problem.problem,
-          working: problem.working,
+          problem: currentSession.problem,
+          working: currentSession.working,
         }),
       });
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to fetch hint.");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Unable to fetch a hint right now.");
       }
-      const hintData = await response.json();
-      setHint(hintData.hint);
-    } catch (error: any) {
-      console.error("Failed to fetch hint:", error);
-      setHint(
-        "Sorry, I couldn't think of a hint right now. Please try again in a moment."
+
+      const { hint: hintText } = await response.json();
+      setHint(hintText);
+      setHistory((entries) =>
+        entries.map((entry) =>
+          entry.id === currentSession.id ? { ...entry, hint: hintText } : entry
+        )
       );
+
+      void fetch(`/api/math-sessions/${currentSession.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hint: hintText }),
+      });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Unable to fetch hint",
+        description: error?.message || "Please try again in a moment.",
+      });
     } finally {
-      setIsFetchingHint(false);
+      setIsHintLoading(false);
     }
   };
 
-  const handleTryAgain = () => {
-    setGameState("solving");
-    answerForm.reset();
-    setFeedback(null);
-    setShowAnswer(false);
+  const handleReset = () => {
+    setMode("form");
+    if (currentSession) {
+      if (hasCompleteConfig(currentSession.config)) {
+        const { primary, topic, difficulty, questionType, model } =
+          currentSession.config;
+        generationForm.reset({
+          primary: primary as string,
+          topic: topic as string,
+          difficulty: difficulty as "easy" | "medium" | "hard",
+          questionType:
+            (questionType as (typeof questionTypeValues)[number]) ??
+            defaultGenerationValues.questionType,
+          model: (model as GeminiModelValue) ?? defaultGenerationValues.model,
+        });
+        updateTopics(primary as PrimaryLevel, false);
+      } else {
+        generationForm.reset(defaultGenerationValues);
+        updateTopics(defaultGenerationValues.primary as PrimaryLevel, true);
+      }
+    }
+    setCurrentSessionId(null);
+    setAnswerValue("");
+    setSelectedChoiceId(null);
+    setSelectedChoiceLabel("");
     setHint(null);
+    setFeedback(null);
+    setHasChecked(false);
   };
 
-  const handleNewProblem = () => {
-    setGameState("idle");
-    setProblem(null);
-    setSessionId(null);
-    setFeedback(null);
-    setShowAnswer(false);
-    setHint(null);
-    generationForm.reset({ difficulty: "easy" });
-    handlePrimaryLevelChange("Primary5");
-    answerForm.reset();
+  const handleGenerateSimilar = async () => {
+    if (!currentSession) return;
+
+    if (!hasCompleteConfig(currentSession.config)) {
+      toast({
+        variant: "destructive",
+        title: "Options unavailable",
+        description:
+          "This saved question doesn't include enough details to recreate it.",
+      });
+      return;
+    }
+
+    try {
+      setIsGeneratingSimilar(true);
+      const generationConfig = {
+        primary: currentSession.config.primary as string,
+        topic: currentSession.config.topic as string,
+        difficulty: currentSession.config.difficulty as
+          | "easy"
+          | "medium"
+          | "hard",
+        questionType:
+          (currentSession.config
+            .questionType as (typeof questionTypeValues)[number]) ??
+          defaultGenerationValues.questionType,
+        model:
+          (currentSession.config.model as GeminiModelValue) ??
+          defaultGenerationValues.model,
+      };
+      const generated = await fetchProblem(generationConfig);
+      const session = await createSession(generated, generationConfig);
+      startSession(session, generationConfig);
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Unable to create a similar question",
+        description: error?.message || "Please try again.",
+      });
+    } finally {
+      setIsGeneratingSimilar(false);
+    }
   };
 
-  const renderContent = () => {
-    switch (gameState) {
-      case "generating":
-      case "checking":
-        return (
-          <div className="flex flex-col items-center justify-center space-y-4 p-8 text-center">
-            <Loader2 className="h-12 w-12 animate-spin text-primary" />
-            <p className="font-semibold text-muted-foreground">
-              {gameState === "generating"
-                ? "Creating a new problem..."
-                : "Checking your answer..."}
-            </p>
-          </div>
-        );
+  const hasHistory = history.length > 0;
+  const canGenerateSimilar = currentSession
+    ? hasCompleteConfig(currentSession.config)
+    : false;
 
-      case "solving":
-      case "feedback":
-        return (
-          <div className="space-y-6">
-            <Card className="bg-background/50">
-              <CardHeader>
-                <CardTitle className="font-headline text-xl">
-                  The Problem
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="whitespace-pre-wrap text-base leading-relaxed">
-                  {problem?.problem && <MathText text={problem.problem} />}
-                </div>
-              </CardContent>
-            </Card>
+  useEffect(() => {
+    if (!hasChecked || !feedback || !feedbackSectionRef.current) return;
+    feedbackSectionRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, [hasChecked, feedback, currentSession?.id]);
 
-            <Form {...answerForm}>
-              <form
-                onSubmit={answerForm.handleSubmit(handleCheckAnswer)}
-                className="space-y-4"
-              >
-                <FormField
-                  control={answerForm.control}
-                  name="answer"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-lg font-semibold">
-                        Your Answer
-                      </FormLabel>
-                      <FormControl>
-                        <Textarea
-                          {...field}
-                          disabled={gameState !== "solving"}
-                          placeholder="Type your answer here..."
-                          rows={3}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <div className="flex flex-wrap gap-2">
-                  {gameState === "solving" && (
-                    <motion.div
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      <Button type="submit" size="lg">
-                        Check Answer
-                      </Button>
-                    </motion.div>
-                  )}
-                  {gameState === "solving" && (
-                    <motion.div
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleFetchHint}
-                      >
-                        <Lightbulb className="mr-2 h-4 w-4" />
-                        Need a hint?
-                      </Button>
-                    </motion.div>
-                  )}
-                </div>
-              </form>
-            </Form>
-
-            <AnimatePresence>
-              {gameState === "feedback" && feedback && feedback.text && (
-                <motion.div
-                  key="feedback-card"
-                  initial={{ y: 24, opacity: 0, scale: 0.98 }}
-                  animate={{ y: 0, opacity: 1, scale: 1 }}
-                  exit={{ y: 12, opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 180, damping: 14 }}
-                >
-                  <Card
-                    className={
-                      feedback.isCorrect
-                        ? "border-primary/50 bg-primary/10"
-                        : "border-destructive/50 bg-destructive/10"
-                    }
-                  >
-                    <CardHeader className="flex-row items-center gap-4 space-y-0">
-                      {feedback.isCorrect ? (
-                        <CheckCircle2 className="h-8 w-8 text-primary" />
-                      ) : (
-                        <XCircle className="h-8 w-8 text-destructive" />
-                      )}
-                      <CardTitle
-                        className={`font-headline text-2xl ${
-                          feedback.isCorrect
-                            ? "text-primary"
-                            : "text-destructive"
-                        }`}
-                      >
-                        {feedback.isCorrect ? "Great Job!" : "Not Quite..."}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-base">{feedback.text}</p>
-                    </CardContent>
-                    <CardFooter className="flex flex-wrap gap-2">
-                      {!feedback.isCorrect && (
-                        <motion.div
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.98 }}
-                        >
-                          <Button variant="outline" onClick={handleTryAgain}>
-                            Try Again
-                          </Button>
-                        </motion.div>
-                      )}
-                      {!showAnswer && (
-                        <motion.div
-                          whileHover={{ scale: 1.03 }}
-                          whileTap={{ scale: 0.98 }}
-                        >
-                          <Button
-                            variant="secondary"
-                            onClick={() => setShowAnswer(true)}
-                          >
-                            Show Answer
-                          </Button>
-                        </motion.div>
-                      )}
-                      <motion.div
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Button onClick={handleNewProblem}>New Problem</Button>
-                      </motion.div>
-                    </CardFooter>
-                  </Card>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <AnimatePresence>
-              {showAnswer && problem && (
-                <motion.div
-                  key="answer-card"
-                  initial={{ y: 16, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  exit={{ y: 8, opacity: 0 }}
-                >
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="font-headline text-xl">
-                        Answer & Working
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <p className="text-base">
-                        <strong>Correct Answer:</strong> {problem.answer}
-                      </p>
-                      <div>
-                        <h4 className="font-semibold mb-2">
-                          Step-by-step solution:
-                        </h4>
-                        <div className="space-y-4">
-                          {problem.working.map((step) => (
-                            <motion.div
-                              key={step.step}
-                              className="p-4 rounded-md border bg-background/50"
-                              initial={{ opacity: 0, y: 8 }}
-                              animate={{ opacity: 1, y: 0 }}
-                            >
-                              <p className="font-semibold text-sm mb-2">
-                                Step {step.step}: {step.explanation}
-                              </p>
-                              <div className="prose prose-sm max-w-none overflow-x-auto">
-                                <BlockMath math={step.formula} />
-                              </div>
-                            </motion.div>
-                          ))}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        );
-
-      case "idle":
-      default:
-        return (
-          <React.Fragment>
+  return (
+    <div className="space-y-8">
+      {(mode === "form" || !currentSession) && (
+        <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+              <Sparkles className="h-5 w-5 text-primary" aria-hidden />
+              Build a custom maths question
+            </CardTitle>
+            <CardDescription className="text-sm text-muted-foreground">
+              Choose your syllabus focus, level, and tone before you generate a
+              challenge.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
             <Form {...generationForm}>
-              <form
-                onSubmit={generationForm.handleSubmit(handleGenerateProblem)}
-                className="space-y-8"
-              >
-                <FormField
-                  control={generationForm.control}
-                  name="primary"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-lg font-semibold">
-                        Choose a Primary Level
-                      </FormLabel>
-                      <Select
-                        onValueChange={(value) => {
-                          field.onChange(value);
-                          handlePrimaryLevelChange(value);
-                        }}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a primary level" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {Object.keys(PrimaryMathematicsSyllabus).map(
-                            (level) => (
+              <form onSubmit={onGenerate} className="space-y-5">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField
+                    control={generationForm.control}
+                    name="primary"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Level</FormLabel>
+                        <Select
+                          onValueChange={handlePrimaryLevelChange}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger aria-label="Select level">
+                              <SelectValue placeholder="Select a level" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {allPrimaryLevels.map((level) => (
                               <SelectItem key={level} value={level}>
-                                {level.replace("Primary", "Primary ")}
+                                {level.replace(/([0-9]+)/, " $1")}
                               </SelectItem>
-                            )
-                          )}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={generationForm.control}
+                    name="difficulty"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Difficulty</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger aria-label="Select difficulty">
+                              <SelectValue placeholder="Select a difficulty" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="easy">Easy</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="hard">Hard</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
                 <FormField
                   control={generationForm.control}
                   name="topic"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-lg font-semibold">
-                        Choose a Topic
-                      </FormLabel>
+                      <FormLabel>Topic</FormLabel>
                       <Select
                         onValueChange={field.onChange}
                         value={field.value}
-                        disabled={!generationForm.getValues("primary")}
                       >
                         <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a math topic" />
+                          <SelectTrigger aria-label="Select topic">
+                            <SelectValue placeholder="Select a topic" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
                           {topics.map((topic) => (
                             <SelectItem key={topic} value={topic}>
-                              {topic.replace(/([A-Z])/g, " $1").trim()}
+                              {formatTopicLabel(topic)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -635,193 +762,386 @@ export default function MathBuddyClient() {
                     </FormItem>
                   )}
                 />
-
-                <FormField
-                  control={generationForm.control}
-                  name="difficulty"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-lg font-semibold">
-                        Difficulty Level
-                      </FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a difficulty" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="easy">Easy</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="hard">Hard</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <motion.div
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                <Collapsible
+                  open={isAdvancedOpen}
+                  onOpenChange={setIsAdvancedOpen}
+                  className="space-y-3"
                 >
-                  <Button type="submit" className="w-full" size="lg">
-                    <Sparkles className="mr-2 h-5 w-5" />
-                    Generate Problem
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="flex items-center gap-2 p-1 text-sm font-semibold text-primary"
+                    >
+                      Advanced options
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 transition-transform",
+                          isAdvancedOpen ? "rotate-180" : "rotate-0"
+                        )}
+                        aria-hidden
+                      />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="grid gap-4 sm:grid-cols-2">
+                    <FormField
+                      control={generationForm.control}
+                      name="questionType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Question type</FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            value={field.value}
+                          >
+                            <FormControl>
+                              <SelectTrigger aria-label="Select question type">
+                                <SelectValue placeholder="Select a question type" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {questionTypeOptions.map((option) => (
+                                <SelectItem
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    {/* <FormField
+                      control={generationForm.control}
+                      name="model"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Gemini model</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger aria-label="Select Gemini model">
+                                <SelectValue placeholder="Select a model" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {GEMINI_MODEL_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    /> */}
+                  </CollapsibleContent>
+                </Collapsible>
+                <div className="flex flex-wrap gap-3">
+                  <Button type="submit" disabled={isGenerating}>
+                    {isGenerating ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />{" "}
+                        Generating
+                      </span>
+                    ) : (
+                      "Generate question"
+                    )}
                   </Button>
-                </motion.div>
+                  {isHistoryLoading && (
+                    <p className="text-sm text-muted-foreground">
+                      Loading recent history…
+                    </p>
+                  )}
+                </div>
               </form>
             </Form>
-          </React.Fragment>
-        );
-    }
-  };
+          </CardContent>
+        </Card>
+      )}
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ type: "spring", stiffness: 120, damping: 18 }}
-      className="w-full max-w-2xl"
-    >
-      <Card className="shadow-2xl">
-        <AlertDialog open={showHintDialog} onOpenChange={setShowHintDialog}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle className="flex items-center gap-2">
-                <Lightbulb className="text-primary" /> Here's a Hint
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {isFetchingHint ? (
-                  <div className="flex items-center justify-center py-4">
-                    <Loader2 className="mr-2 h-6 w-6 animate-spin" />{" "}
-                    Thinking...
-                  </div>
-                ) : (
-                  hint || "Sorry, I'm stumped too!"
-                )}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogAction>Got it, thanks!</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-        <Sheet open={showHistorySheet} onOpenChange={setShowHistorySheet}>
-          <SheetContent className="w-full sm:max-w-lg">
-            <SheetHeader>
-              <SheetTitle>Problem History</SheetTitle>
-              <SheetDescription>
-                Review your previously attempted problems.
-              </SheetDescription>
-            </SheetHeader>
-            <ScrollArea className="h-[calc(100%-4rem)]">
-              <div className="space-y-4 p-4">
-                {history.length > 0 ? (
-                  history.map((session) => (
-                    <Card key={session.id} className="bg-muted/50">
-                      <CardHeader>
-                        <CardDescription>
-                          {new Date(session.created_at).toLocaleString()}
-                        </CardDescription>
-                        <CardTitle className="text-base font-normal">
-                          <MathText text={session.problem_text} />
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {session.submissions.length > 0 ? (
-                          <ul className="space-y-2 text-sm">
-                            {session.submissions.map((sub, i) => (
-                              <li key={i} className="flex items-center gap-2">
-                                {sub.is_correct ? (
-                                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                                ) : (
-                                  <XCircle className="h-4 w-4 text-destructive" />
-                                )}
-                                <span>Your answer: {sub.user_answer}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            No answer submitted.
-                          </p>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))
-                ) : (
-                  <div className="flex flex-col items-center justify-center rounded-md border border-dashed p-8 text-center">
-                    <HelpCircle className="h-10 w-10 text-muted-foreground" />
-                    <p className="mt-4 font-semibold">No History Yet</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Generate your first problem to start your history.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-          </SheetContent>
-        </Sheet>
-        <CardHeader className="text-center">
-          <motion.div
-            className="mx-auto mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10"
-            initial={{ rotate: -8, scale: 0.9, opacity: 0 }}
-            animate={{ rotate: 0, scale: 1, opacity: 1 }}
-            transition={{ type: "spring", stiffness: 200, damping: 12 }}
-          >
-            <BrainCircuit className="h-10 w-10 text-primary" />
-          </motion.div>
-          <motion.div
-            initial={{ y: 8, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.05 }}
-          >
-            <CardTitle className="font-headline text-4xl">
-              ✨ Gemini Math Buddy
+      {currentSession && (
+        <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
+          <CardHeader className="space-y-2">
+            <CardTitle className="text-lg font-semibold text-foreground">
+              Generated question
             </CardTitle>
-          </motion.div>
-          <motion.div
-            initial={{ y: 8, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.12 }}
-          >
-            <CardDescription className="text-base">
-              Let’s solve fun math puzzles together!
+            <CardDescription className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              {currentSession.config.difficulty ? (
+                <Badge
+                  variant="outline"
+                  className="rounded-full border px-3 py-1 text-xs font-semibold text-primary"
+                >
+                  {currentSession.config.difficulty.toUpperCase()}
+                </Badge>
+              ) : null}
+              {currentSession.config.questionType ? (
+                <Badge
+                  variant="outline"
+                  className="rounded-full border px-3 py-1 text-xs font-semibold text-primary/80"
+                >
+                  {currentSession.config.questionType === "multipleChoice"
+                    ? "Multiple choice"
+                    : "Subjective"}
+                </Badge>
+              ) : null}
+              <span>
+                {[
+                  currentSession.config.primary
+                    ? `Level ${currentSession.config.primary.replace(
+                        /([0-9]+)/,
+                        " $1"
+                      )}`
+                    : null,
+                  currentSession.config.topic
+                    ? formatTopicLabel(currentSession.config.topic)
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "Stored without generation options"}
+              </span>
             </CardDescription>
-          </motion.div>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-6 flex justify-between items-center bg-accent/10 p-3 rounded-lg">
-            <motion.div
-              key={`${score.correct}-${score.total}`}
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", stiffness: 200, damping: 12 }}
-              className="text-center"
-            >
-              <p className="text-2xl font-bold">
-                {score.correct}/{score.total}
+          </CardHeader>
+          <CardContent className="space-y-6 text-base text-foreground">
+            <div className="rounded-2xl border border-border/60 bg-muted/20 p-5">
+              <MathText text={currentSession.problem} />
+            </div>
+            <div className="space-y-4">
+              {currentSession.config.questionType === "multipleChoice" ? (
+                <div className="space-y-3">
+                  {currentSession.choices.length ? (
+                    <RadioGroup
+                      value={selectedChoiceId ?? ""}
+                      onValueChange={handleChoiceSelect}
+                      className="space-y-3"
+                    >
+                      {currentSession.choices.map((choice) => (
+                        <label
+                          key={choice.id}
+                          className={cn(
+                            "flex w-full cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 text-sm shadow-sm transition",
+                            selectedChoiceId === choice.id
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border/60 bg-muted/10 text-foreground"
+                          )}
+                        >
+                          <RadioGroupItem value={choice.id} />
+                          <div>
+                            <p className="font-semibold">{choice.label}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Value: {choice.value}
+                            </p>
+                          </div>
+                        </label>
+                      ))}
+                    </RadioGroup>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">
+                        Choices were not saved for this question. Record your
+                        answer manually instead.
+                      </p>
+                      <Textarea
+                        value={answerValue}
+                        onChange={(event) => setAnswerValue(event.target.value)}
+                        placeholder="Type your final answer here."
+                        rows={4}
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Textarea
+                  value={answerValue}
+                  onChange={(event) => setAnswerValue(event.target.value)}
+                  placeholder="Describe your steps and final answer here."
+                  rows={6}
+                />
+              )}
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  type="button"
+                  onClick={handleCheckAnswer}
+                  disabled={isChecking}
+                >
+                  {isChecking ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />{" "}
+                      Checking
+                    </span>
+                  ) : (
+                    "Check answer"
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleRequestHint}
+                  disabled={isHintLoading}
+                  className="border-border/60"
+                >
+                  {isHintLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />{" "}
+                      Thinking
+                    </span>
+                  ) : (
+                    "Need a hint?"
+                  )}
+                </Button>
+              </div>
+              {hint && (
+                <div className="rounded-2xl border border-dashed border-primary/40 bg-primary/5 p-4 text-sm text-primary">
+                  {hint}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {hasChecked && currentSession && feedback && (
+        <Card
+          ref={feedbackSectionRef}
+          className="rounded-2xl border border-border/60 bg-white shadow-sm"
+        >
+          <CardHeader className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Info className="h-5 w-5 text-primary" aria-hidden />
+              <CardTitle className="text-lg font-semibold text-foreground">
+                Feedback
+              </CardTitle>
+            </div>
+            <CardDescription className="text-sm text-muted-foreground">
+              {currentSession.latestSubmission?.isCorrect
+                ? "Great job!"
+                : "Here's how you can improve your approach next time."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <p className="rounded-2xl border border-border/40 bg-muted/20 p-4 text-sm text-foreground/90">
+              {feedback}
+            </p>
+            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-primary">
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary/80">
+                Final answer
               </p>
-              <p className="text-sm text-muted-foreground">Problems Solved</p>
-            </motion.div>
-            <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowHistorySheet(true)}
-              >
-                <History className="mr-2 h-4 w-4" />
-                View History
-              </Button>
-            </motion.div>
-          </div>
-          {renderContent()}
-        </CardContent>
-      </Card>
-    </motion.div>
+              <p className="mt-1 text-base font-semibold text-primary">
+                {currentSession.answer}
+              </p>
+            </div>
+            {currentSession.working.length > 0 && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-muted-foreground">
+                  Answer working (auto-rendered)
+                </h3>
+                <WorkingCanvas
+                  working={currentSession.working}
+                  finalAnswer={currentSession.answer}
+                />
+              </div>
+            )}
+          </CardContent>
+          <CardFooter className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              onClick={handleGenerateSimilar}
+              disabled={isGeneratingSimilar || !canGenerateSimilar}
+            >
+              {isGeneratingSimilar ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />{" "}
+                  Re-rolling
+                </span>
+              ) : (
+                "Generate similar question"
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleReset}
+              className="border-border/60"
+            >
+              Reset to question builder
+            </Button>
+          </CardFooter>
+        </Card>
+      )}
+
+      {hasHistory && (
+        <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
+          <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                <History
+                  className="h-5 w-5 text-muted-foreground"
+                  aria-hidden
+                />{" "}
+                Past questions
+              </CardTitle>
+              <CardDescription className="text-sm text-muted-foreground">
+                Tap to revisit full working and your submissions.
+              </CardDescription>
+            </div>
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="border-border/60"
+            >
+              <Link href="/past-questions">View all</Link>
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {history.map((entry) => {
+                const statusLabel = entry.latestSubmission
+                  ? entry.latestSubmission.isCorrect
+                    ? "Correct"
+                    : "Needs review"
+                  : "Awaiting check";
+                const statusClass = entry.latestSubmission
+                  ? entry.latestSubmission.isCorrect
+                    ? "border-primary/30 bg-primary/10 text-primary"
+                    : "border-destructive/30 bg-destructive/10 text-destructive"
+                  : "border-border/60 bg-muted/40 text-muted-foreground";
+                return (
+                  <Link
+                    key={entry.id}
+                    href={`/question/${entry.id}`}
+                    className={cn(
+                      "group block rounded-2xl border border-border/50 bg-white/90 p-4 shadow-sm transition hover:border-primary/40 hover:bg-primary/5",
+                      currentSessionId === entry.id && "border-primary/50"
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(entry.createdAt).toLocaleString()}
+                      </p>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-xs font-semibold",
+                          statusClass
+                        )}
+                      >
+                        {statusLabel}
+                      </Badge>
+                    </div>
+                    <p className="mt-3 text-sm font-medium text-foreground/90">
+                      {summarizeProblem(entry.problem)}
+                    </p>
+                  </Link>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }

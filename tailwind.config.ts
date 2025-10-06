@@ -10,9 +10,9 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        body: ['PT Sans', 'sans-serif'],
-        headline: ['PT Sans', 'sans-serif'],
-        code: ['monospace'],
+        body: ["Nunito", "sans-serif"],
+        headline: ["Baloo 2", "cursive"],
+        code: ["monospace"],
       },
       colors: {
         background: 'hsl(var(--background))',
