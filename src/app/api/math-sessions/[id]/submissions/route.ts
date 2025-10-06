@@ -52,7 +52,8 @@ function parseNumericAnswer(value: string) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const sessionId = typeof params?.id === "string" && params.id.trim() ? params.id.trim() : null;
     if (!sessionId) {

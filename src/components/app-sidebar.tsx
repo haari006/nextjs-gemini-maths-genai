@@ -1,8 +1,8 @@
 "use client";
 
+import { GraduationCap, History, ListChecks } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GraduationCap, History, ListChecks } from "lucide-react";
 
 import {
   Sidebar,
@@ -47,7 +47,9 @@ export function AppSidebar({ children }: { children: React.ReactNode }) {
       <Sidebar collapsible="icon" className="bg-sidebar">
         <SidebarHeader className="px-3 py-4">
           <div className="flex items-center gap-3 rounded-2xl bg-primary/10 px-3 py-2">
-            <span className="text-2xl font-headline text-primary">Math Buddy</span>
+            <span className="text-2xl font-headline text-primary">
+              Math Buddy
+            </span>
           </div>
         </SidebarHeader>
         <SidebarContent>
@@ -62,9 +64,14 @@ export function AppSidebar({ children }: { children: React.ReactNode }) {
                   return (
                     <SidebarMenuItem key={route.href}>
                       <SidebarMenuButton asChild isActive={isActive}>
-                        <Link href={route.href} className="flex items-center gap-3">
+                        <Link
+                          href={route.href}
+                          className="flex items-center gap-3"
+                        >
                           <route.icon className="h-4 w-4" />
-                          <span className="text-sm font-medium">{route.label}</span>
+                          <span className="text-sm font-medium">
+                            {route.label}
+                          </span>
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -77,7 +84,8 @@ export function AppSidebar({ children }: { children: React.ReactNode }) {
         <SidebarSeparator />
         <SidebarFooter className="px-3 pb-4">
           <p className="rounded-2xl border border-sidebar-border bg-sidebar-accent/40 p-3 text-xs text-sidebar-foreground/80">
-            Crafted for curious minds. Switch between your overview and challenge lab anytime.
+            Crafted for curious minds. Switch between your overview and
+            challenge lab anytime.
           </p>
         </SidebarFooter>
         <SidebarRail />

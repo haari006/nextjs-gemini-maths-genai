@@ -5,8 +5,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { MathSessionSummary } from "@/types/math";
 
@@ -24,22 +36,39 @@ type SessionsResponse = {
 };
 
 function summarizeProblem(problem: string) {
-  return problem.replace(/\$[^$]*\$/g, " ").replace(/\s+/g, " ").trim();
+  return problem
+    .replace(/\$[^$]*\$/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function statusBadge(entry: MathSessionSummary) {
   if (!entry.latestSubmission) {
-    return { label: "Awaiting check", className: "border-border/60 bg-muted/40 text-muted-foreground" };
+    return {
+      label: "Awaiting check",
+      className: "border-border/60 bg-muted/40 text-muted-foreground",
+    };
   }
 
   return entry.latestSubmission.isCorrect
-    ? { label: "Correct", className: "border-primary/30 bg-primary/10 text-primary" }
-    : { label: "Needs review", className: "border-destructive/30 bg-destructive/10 text-destructive" };
+    ? {
+        label: "Correct",
+        className: "border-primary/30 bg-primary/10 text-primary",
+      }
+    : {
+        label: "Needs review",
+        className: "border-destructive/30 bg-destructive/10 text-destructive",
+      };
 }
 
 function configLabel(entry: MathSessionSummary) {
   if (entry.config.primary && entry.config.topic && entry.config.difficulty) {
-    return `${entry.config.primary.replace(/([0-9]+)/, " $1")} · ${entry.config.topic.replace(/([A-Z])/g, " $1").trim()} · ${entry.config.difficulty.toUpperCase()}`;
+    return `${entry.config.primary.replace(
+      /([0-9]+)/,
+      " $1"
+    )} · ${entry.config.topic
+      .replace(/([A-Z])/g, " $1")
+      .trim()} · ${entry.config.difficulty.toUpperCase()}`;
   }
   return "Stored without generation options";
 }
@@ -94,21 +123,29 @@ export default function PastQuestionsPage() {
       </nav>
 
       <div className="space-y-2 text-center">
-        <h1 className="text-3xl font-headline text-foreground sm:text-4xl">Past questions</h1>
+        <h1 className="text-3xl font-headline text-foreground sm:text-4xl">
+          Past questions
+        </h1>
         <p className="text-base text-muted-foreground">
-          Browse every challenge you generated, filter by status, and revisit full working any time.
+          Browse every challenge you generated, filter by status, and revisit
+          full working any time.
         </p>
       </div>
 
       <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
         <CardHeader>
-          <CardTitle className="text-lg font-semibold text-foreground">Filters</CardTitle>
+          <CardTitle className="text-lg font-semibold text-foreground">
+            Filters
+          </CardTitle>
           <CardDescription className="text-sm text-muted-foreground">
             Narrow the list to the questions you want to review.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          <label htmlFor="status-filter" className="text-sm font-medium text-muted-foreground">
+          <label
+            htmlFor="status-filter"
+            className="text-sm font-medium text-muted-foreground"
+          >
             Status
           </label>
           <Select
@@ -133,7 +170,9 @@ export default function PastQuestionsPage() {
       {loading ? (
         <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
           <CardHeader>
-            <CardTitle className="text-lg font-semibold text-foreground">Loading past questions…</CardTitle>
+            <CardTitle className="text-lg font-semibold text-foreground">
+              Loading past questions…
+            </CardTitle>
             <CardDescription className="text-sm text-muted-foreground">
               Fetching your saved sessions from Supabase.
             </CardDescription>
@@ -145,7 +184,9 @@ export default function PastQuestionsPage() {
       ) : filteredHistory.length === 0 ? (
         <Card className="rounded-2xl border border-border/60 bg-white shadow-sm">
           <CardHeader>
-            <CardTitle className="text-lg font-semibold text-foreground">No saved questions</CardTitle>
+            <CardTitle className="text-lg font-semibold text-foreground">
+              No saved questions
+            </CardTitle>
             <CardDescription className="text-sm text-muted-foreground">
               Adjust your filters or generate a new question to see it here.
             </CardDescription>
@@ -161,7 +202,10 @@ export default function PastQuestionsPage() {
           {filteredHistory.map((entry) => {
             const status = statusBadge(entry);
             return (
-              <Card key={entry.id} className="rounded-2xl border border-border/60 bg-white shadow-sm">
+              <Card
+                key={entry.id}
+                className="rounded-2xl border border-border/60 bg-white shadow-sm"
+              >
                 <CardHeader className="flex flex-wrap items-center gap-3 sm:flex-row sm:justify-between">
                   <div className="space-y-1">
                     <CardTitle className="text-base font-semibold text-foreground">
@@ -171,21 +215,29 @@ export default function PastQuestionsPage() {
                       Saved {new Date(entry.createdAt).toLocaleString()}
                     </CardDescription>
                   </div>
-                  <Badge variant="outline" className={cn("rounded-full border px-3 py-1 text-xs font-semibold", status.className)}>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs font-semibold",
+                      status.className
+                    )}
+                  >
                     {status.label}
                   </Badge>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <p className="text-sm text-foreground/90">{summarizeProblem(entry.problem)}</p>
+                  <p className="text-sm text-foreground/90">
+                    {summarizeProblem(entry.problem)}
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    Correct answer: <span className="font-semibold text-foreground">{entry.answer || "—"}</span>
+                    Correct answer:{" "}
+                    <span className="font-semibold text-foreground">
+                      {entry.answer || "—"}
+                    </span>
                   </p>
                   <div className="flex flex-wrap gap-3">
                     <Button asChild>
                       <Link href={`/question/${entry.id}`}>View details</Link>
-                    </Button>
-                    <Button asChild variant="outline" className="border-border/60">
-                      <Link href="/questions">Generate new question</Link>
                     </Button>
                   </div>
                 </CardContent>
