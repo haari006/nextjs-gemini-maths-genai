@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createServerSupabaseClient } from "@/lib/supabase-server";
-import { generateMathProblemOutputWorkingSchema } from "@/types/math";
 
 const UpdateSchema = z.object({
   hint: z.string().min(1).optional(),
@@ -37,18 +36,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         `
           id,
           created_at,
-          primary_level,
-          topic,
-          difficulty,
           problem_text,
-          answer_text,
-          working_steps,
-          latest_hint,
+          correct_answer,
           submissions:math_problem_submissions(
             id,
             created_at,
             user_answer,
-            feedback,
+            feedback_text,
             is_correct
           )
         `
@@ -68,13 +62,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const workingResult = generateMathProblemOutputWorkingSchema.safeParse(data.working_steps);
-
     const submissions = (data.submissions ?? []).map((submission: any) => ({
       id: submission.id,
       createdAt: submission.created_at,
-      userAnswer: submission.user_answer,
-      feedback: submission.feedback,
+      userAnswer:
+        submission.user_answer !== null && submission.user_answer !== undefined
+          ? String(submission.user_answer)
+          : "",
+      feedback: submission.feedback_text ?? null,
       isCorrect: submission.is_correct,
     }));
 
@@ -87,14 +82,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         id: data.id,
         createdAt: data.created_at,
         config: {
-          primary: data.primary_level,
-          topic: data.topic,
-          difficulty: data.difficulty,
+          primary: null,
+          topic: null,
+          difficulty: null,
         },
         problem: data.problem_text,
-        answer: data.answer_text,
-        working: workingResult.success ? workingResult.data : [],
-        hint: data.latest_hint ?? null,
+        answer: data.correct_answer !== null ? String(data.correct_answer) : "",
+        working: [],
+        hint: null,
         latestSubmission,
         submissions,
       },
@@ -134,29 +129,9 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       return NextResponse.json({ updated: false });
     }
 
-    const supabase = createServerSupabaseClient();
-
-    if (!supabase) {
-      return NextResponse.json(
-        { error: "Supabase client is not configured." },
-        { status: 500 }
-      );
-    }
-
-    const { error } = await supabase
-      .from("math_problem_sessions")
-      .update({ latest_hint: hint })
-      .eq("id", parsedParams.data.id);
-
-    if (error) {
-      console.error("Failed to update session hint", error);
-      return NextResponse.json(
-        { error: "Unable to store hint." },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ updated: true });
+    // Hints are not persisted in the current Supabase schema but we still
+    // acknowledge the request so the client can cache the latest hint locally.
+    return NextResponse.json({ updated: false });
   } catch (error: any) {
     console.error("Error in PATCH /api/math-sessions/[id]", error);
     return NextResponse.json(

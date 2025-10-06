@@ -14,22 +14,19 @@ const paramsSchema = z.object({
   id: z.string().uuid().or(z.string().min(1)),
 });
 
-function stripHtml(input: string) {
+function toPlainText(input: string) {
   return input
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-function toPlainText(input: string) {
-  return stripHtml(input).replace(/\s+/g, " ").trim();
-}
-
 function parseNumericAnswer(value: string) {
-  const cleaned = value.replace(/,/g, "").trim();
+  const cleaned = toPlainText(value).replace(/,/g, "").trim();
   if (!cleaned) {
     return null;
   }
@@ -53,20 +50,6 @@ function parseNumericAnswer(value: string) {
 
   const parsed = Number.parseFloat(cleaned);
   return Number.isNaN(parsed) ? null : parsed;
-}
-
-function answersMatch(correctAnswer: string, studentAnswer: string) {
-  const plainCorrect = toPlainText(correctAnswer).toLowerCase();
-  const plainStudent = toPlainText(studentAnswer).toLowerCase();
-
-  const numericCorrect = parseNumericAnswer(plainCorrect);
-  const numericStudent = parseNumericAnswer(plainStudent);
-
-  if (numericCorrect !== null && numericStudent !== null) {
-    return Math.abs(numericCorrect - numericStudent) < 0.001;
-  }
-
-  return plainCorrect === plainStudent;
 }
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -100,7 +83,23 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     const { problem, correctAnswer, studentAnswer } = parsedPayload.data;
 
-    const isCorrect = answersMatch(correctAnswer, studentAnswer);
+    const numericStudentAnswer = parseNumericAnswer(studentAnswer);
+    if (numericStudentAnswer === null) {
+      return NextResponse.json(
+        { error: "Please provide a numeric answer to check." },
+        { status: 422 }
+      );
+    }
+
+    const numericCorrectAnswer = parseNumericAnswer(correctAnswer);
+    if (numericCorrectAnswer === null) {
+      return NextResponse.json(
+        { error: "The correct answer could not be evaluated." },
+        { status: 500 }
+      );
+    }
+
+    const isCorrect = Math.abs(numericCorrectAnswer - numericStudentAnswer) < 0.001;
 
     const feedbackResult = await providePersonalizedFeedback({
       problem,
@@ -112,9 +111,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       .from("math_problem_submissions")
       .insert({
         session_id: parsedParams.data.id,
-        user_answer: studentAnswer,
+        user_answer: numericStudentAnswer,
         is_correct: isCorrect,
-        feedback: feedbackResult.feedback,
+        feedback_text: feedbackResult.feedback,
       })
       .select("id, created_at")
       .single();

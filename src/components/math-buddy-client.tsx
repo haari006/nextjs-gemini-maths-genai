@@ -34,6 +34,12 @@ const generationSchema = z.object({
   difficulty: z.enum(["easy", "medium", "hard"]),
 });
 
+const defaultGenerationValues: z.infer<typeof generationSchema> = {
+  primary: "Primary5",
+  topic: "",
+  difficulty: "easy",
+};
+
 type PrimaryLevel = keyof typeof PrimaryMathematicsSyllabus;
 
 type SessionResponse = {
@@ -43,6 +49,10 @@ type SessionResponse = {
 type SessionsResponse = {
   sessions: MathSessionSummary[];
 };
+
+function hasCompleteConfig(config: MathSessionSummary["config"]) {
+  return Boolean(config.primary && config.topic && config.difficulty);
+}
 
 function stripHtml(input: string) {
   return input
@@ -107,11 +117,7 @@ export default function MathBuddyClient() {
   const { toast } = useToast();
   const generationForm = useForm<z.infer<typeof generationSchema>>({
     resolver: zodResolver(generationSchema),
-    defaultValues: {
-      primary: "Primary5",
-      difficulty: "easy",
-      topic: "",
-    },
+    defaultValues: defaultGenerationValues,
   });
 
   const [topics, setTopics] = useState<string[]>([]);
@@ -322,6 +328,15 @@ export default function MathBuddyClient() {
       return;
     }
 
+    if (parseNumericAnswer(plainAnswer) === null) {
+      toast({
+        variant: "destructive",
+        title: "Enter a numeric answer",
+        description: "Please provide a number so we can check it.",
+      });
+      return;
+    }
+
     try {
       setIsChecking(true);
       const response = await fetch(`/api/math-sessions/${currentSession.id}/submissions`, {
@@ -412,8 +427,18 @@ export default function MathBuddyClient() {
   const handleReset = () => {
     setMode("form");
     if (currentSession) {
-      generationForm.reset(currentSession.config);
-      updateTopics(currentSession.config.primary as PrimaryLevel, false);
+      if (hasCompleteConfig(currentSession.config)) {
+        const { primary, topic, difficulty } = currentSession.config;
+        generationForm.reset({
+          primary: primary as string,
+          topic: topic as string,
+          difficulty: difficulty as "easy" | "medium" | "hard",
+        });
+        updateTopics(primary as PrimaryLevel, false);
+      } else {
+        generationForm.reset(defaultGenerationValues);
+        updateTopics(defaultGenerationValues.primary as PrimaryLevel, true);
+      }
     }
     setCurrentSessionId(null);
     setAnswerValue("");
@@ -425,11 +450,25 @@ export default function MathBuddyClient() {
   const handleGenerateSimilar = async () => {
     if (!currentSession) return;
 
+    if (!hasCompleteConfig(currentSession.config)) {
+      toast({
+        variant: "destructive",
+        title: "Options unavailable",
+        description: "This saved question doesn't include enough details to recreate it.",
+      });
+      return;
+    }
+
     try {
       setIsGeneratingSimilar(true);
-      const generated = await fetchProblem(currentSession.config);
-      const session = await createSession(generated, currentSession.config);
-      startSession(session, currentSession.config);
+      const generationConfig = {
+        primary: currentSession.config.primary as string,
+        topic: currentSession.config.topic as string,
+        difficulty: currentSession.config.difficulty as "easy" | "medium" | "hard",
+      };
+      const generated = await fetchProblem(generationConfig);
+      const session = await createSession(generated, generationConfig);
+      startSession(session, generationConfig);
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -442,6 +481,7 @@ export default function MathBuddyClient() {
   };
 
   const hasHistory = history.length > 0;
+  const canGenerateSimilar = currentSession ? hasCompleteConfig(currentSession.config) : false;
 
   useEffect(() => {
     if (!hasChecked || !feedback || !feedbackSectionRef.current) return;
@@ -643,7 +683,11 @@ export default function MathBuddyClient() {
             )}
           </CardContent>
           <CardFooter className="flex flex-wrap gap-3">
-            <Button type="button" onClick={handleGenerateSimilar} disabled={isGeneratingSimilar}>
+            <Button
+              type="button"
+              onClick={handleGenerateSimilar}
+              disabled={isGeneratingSimilar || !canGenerateSimilar}
+            >
               {isGeneratingSimilar ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Re-rolling

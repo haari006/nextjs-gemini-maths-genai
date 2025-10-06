@@ -22,7 +22,6 @@ const CreateSessionSchema = z.object({
 
 const ListQuerySchema = z.object({
   status: z.enum(["all", "correct", "incorrect", "pending"]).default("all"),
-  difficulty: z.enum(["all", "easy", "medium", "hard"]).default("all"),
   limit: z
     .string()
     .optional()
@@ -41,6 +40,47 @@ function computeLatestSubmission(submissions: any[] = []) {
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
   return sorted[sorted.length - 1];
+}
+
+function stripHtml(input: string) {
+  return input
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .trim();
+}
+
+function toPlainText(input: string) {
+  return stripHtml(input).replace(/\s+/g, " ").trim();
+}
+
+function parseNumericAnswer(value: string) {
+  const cleaned = value.replace(/,/g, "").trim();
+  if (!cleaned) {
+    return null;
+  }
+
+  const fractionMatch = cleaned.match(/^(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)/);
+  if (fractionMatch) {
+    const numerator = parseFloat(fractionMatch[1]);
+    const denominator = parseFloat(fractionMatch[2]);
+    if (!Number.isNaN(numerator) && !Number.isNaN(denominator) && denominator !== 0) {
+      return numerator / denominator;
+    }
+  }
+
+  const percentMatch = cleaned.match(/^(-?\d+(?:\.\d+)?)\s*%$/);
+  if (percentMatch) {
+    const numeric = parseFloat(percentMatch[1]);
+    if (!Number.isNaN(numeric)) {
+      return numeric / 100;
+    }
+  }
+
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 export async function POST(req: NextRequest) {
@@ -66,19 +106,22 @@ export async function POST(req: NextRequest) {
 
     const { config, problem, answer, working } = parsed.data;
 
+    const numericAnswer = parseNumericAnswer(toPlainText(answer));
+
+    if (numericAnswer === null) {
+      return NextResponse.json(
+        { error: "The generated answer could not be stored as a number." },
+        { status: 422 }
+      );
+    }
+
     const { data, error } = await supabase
       .from("math_problem_sessions")
       .insert({
-        primary_level: config.primary,
-        topic: config.topic,
-        difficulty: config.difficulty,
         problem_text: problem,
-        answer_text: answer,
-        working_steps: working,
+        correct_answer: numericAnswer,
       })
-      .select(
-        `id, created_at, primary_level, topic, difficulty, problem_text, answer_text, working_steps, latest_hint`
-      )
+      .select(`id, created_at, problem_text, correct_answer`)
       .single();
 
     if (error) {
@@ -94,14 +137,14 @@ export async function POST(req: NextRequest) {
         id: data.id,
         createdAt: data.created_at,
         config: {
-          primary: data.primary_level,
-          topic: data.topic,
-          difficulty: data.difficulty,
+          primary: config.primary ?? null,
+          topic: config.topic ?? null,
+          difficulty: config.difficulty ?? null,
         },
         problem: data.problem_text,
-        answer: data.answer_text,
-        working: normalizeWorking(data.working_steps),
-        hint: data.latest_hint ?? null,
+        answer,
+        working: normalizeWorking(working),
+        hint: null,
         latestSubmission: null,
       },
     });
@@ -134,36 +177,27 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const { status, difficulty, limit } = parsedQuery.data;
+    const { status, limit } = parsedQuery.data;
 
-    let query = supabase
+    const query = supabase
       .from("math_problem_sessions")
       .select(
         `
           id,
           created_at,
-          primary_level,
-          topic,
-          difficulty,
           problem_text,
-          answer_text,
-          working_steps,
-          latest_hint,
+          correct_answer,
           submissions:math_problem_submissions(
             id,
             created_at,
             user_answer,
-            feedback,
+            feedback_text,
             is_correct
           )
         `
       )
       .order("created_at", { ascending: false })
       .limit(limit);
-
-    if (difficulty !== "all") {
-      query = query.eq("difficulty", difficulty);
-    }
 
     const { data, error } = await query;
 
@@ -197,20 +231,23 @@ export async function GET(req: NextRequest) {
         id: session.id,
         createdAt: session.created_at,
         config: {
-          primary: session.primary_level,
-          topic: session.topic,
-          difficulty: session.difficulty,
+          primary: null,
+          topic: null,
+          difficulty: null,
         },
         problem: session.problem_text,
-        answer: session.answer_text,
-        working: normalizeWorking(session.working_steps),
-        hint: session.latest_hint ?? null,
+        answer: session.correct_answer !== null ? String(session.correct_answer) : "",
+        working: [],
+        hint: null,
         latestSubmission: latest
           ? {
               id: latest.id,
               createdAt: latest.created_at,
-              userAnswer: latest.user_answer,
-              feedback: latest.feedback,
+              userAnswer:
+                latest.user_answer !== null && latest.user_answer !== undefined
+                  ? String(latest.user_answer)
+                  : "",
+              feedback: latest.feedback_text ?? null,
               isCorrect: latest.is_correct,
             }
           : null,

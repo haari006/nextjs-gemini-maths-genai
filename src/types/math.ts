@@ -32,14 +32,16 @@ export type ProblemHistoryEntry = {
 
 export type ProblemHistory = ProblemHistoryEntry[];
 
+export type SessionConfig = {
+  primary: string | null;
+  topic: string | null;
+  difficulty: "easy" | "medium" | "hard" | null;
+};
+
 export type MathSessionSummary = {
   id: string;
   createdAt: string;
-  config: {
-    primary: string;
-    topic: string;
-    difficulty: "easy" | "medium" | "hard";
-  };
+  config: SessionConfig;
   problem: string;
   answer: string;
   working: WorkingStep[];

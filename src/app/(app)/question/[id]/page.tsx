@@ -16,10 +16,6 @@ type SessionResponse = {
   session: MathSessionDetail;
 };
 
-function formatTopicLabel(topic: string) {
-  return topic.replace(/([A-Z])/g, " $1").replace(/\s+/g, " ").trim();
-}
-
 function statusConfig(session: MathSessionDetail | null) {
   if (!session || !session.latestSubmission) {
     return { label: "Awaiting check", className: "border-border/60 bg-muted/40 text-muted-foreground" };
@@ -64,6 +60,14 @@ export default function QuestionDetailPage() {
 
   const status = useMemo(() => statusConfig(session), [session]);
   const latestSubmission = session?.latestSubmission ?? null;
+
+  const metadataLabel = useMemo(() => {
+    if (!session) return "";
+    if (session.config.primary && session.config.topic && session.config.difficulty) {
+      return `${session.config.primary.replace(/([0-9]+)/, " $1")} · ${session.config.topic.replace(/([A-Z])/g, " $1").trim()} · ${session.config.difficulty.toUpperCase()}`;
+    }
+    return "Stored without generation options";
+  }, [session]);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
@@ -126,10 +130,7 @@ export default function QuestionDetailPage() {
                 <Badge variant="outline" className={cn("rounded-full border px-3 py-1 text-xs font-semibold", status.className)}>
                   {status.label}
                 </Badge>
-                <span>
-                  {`Level ${session.config.primary.replace(/([0-9]+)/, " $1")}`} · {formatTopicLabel(session.config.topic)} ·
-                  {` ${session.config.difficulty.charAt(0).toUpperCase()}${session.config.difficulty.slice(1)}`}
-                </span>
+                <span>{metadataLabel}</span>
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
