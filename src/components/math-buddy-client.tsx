@@ -5,8 +5,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   BrainCircuit,
   CheckCircle2,
-  HelpCircle,
-  History,
   Lightbulb,
   Loader2,
   PartyPopper,
@@ -47,7 +45,6 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -55,13 +52,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
@@ -70,6 +60,7 @@ import type { GenerateMathProblemOutput } from "@/ai/flows/generate-math-problem
 import { supabase } from "@/lib/supabase-client";
 import { PrimaryMathematicsSyllabus } from "@/lib/syllabus";
 import { MathText } from "./math-text";
+import type { ProblemHistory, Score } from "@/types/math";
 
 const generationSchema = z.object({
   primary: z.string({ required_error: "Please select a primary level." }),
@@ -83,18 +74,17 @@ const answerSchema = z.object({
 
 type GameState = "idle" | "generating" | "solving" | "checking" | "feedback";
 type PrimaryLevel = keyof typeof PrimaryMathematicsSyllabus;
-type Score = { correct: number; total: number };
-type ProblemHistory = {
-  id: string;
-  created_at: string;
-  problem_text: string;
-  submissions: {
-    user_answer: number;
-    is_correct: boolean;
-  }[];
-}[];
+type MathBuddyClientProps = {
+  score: Score;
+  history: ProblemHistory;
+  refreshProgress: () => Promise<void>;
+};
 
-export default function MathBuddyClient() {
+export default function MathBuddyClient({
+  score,
+  history,
+  refreshProgress,
+}: MathBuddyClientProps) {
   const [gameState, setGameState] = useState<GameState>("idle");
   const [problem, setProblem] = useState<GenerateMathProblemOutput | null>(
     null
@@ -106,9 +96,6 @@ export default function MathBuddyClient() {
   } | null>(null);
   const [topics, setTopics] = useState<string[]>([]);
   const [showAnswer, setShowAnswer] = useState(false);
-  const [score, setScore] = useState<Score>({ correct: 0, total: 0 });
-  const [history, setHistory] = useState<ProblemHistory>([]);
-  const [showHistorySheet, setShowHistorySheet] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [showHintDialog, setShowHintDialog] = useState(false);
   const [isFetchingHint, setIsFetchingHint] = useState(false);
@@ -168,42 +155,6 @@ export default function MathBuddyClient() {
     resolver: zodResolver(answerSchema),
   });
 
-  const fetchScoreAndHistory = useCallback(async () => {
-    const { data: submissions, error: submissionsError } = await supabase
-      .from("math_problem_submissions")
-      .select("is_correct");
-
-    if (submissionsError) {
-      console.error("Error fetching score:", submissionsError);
-    } else {
-      const correct = submissions.filter((s) => s.is_correct).length;
-      const total = submissions.length;
-      setScore({ correct, total });
-    }
-
-    const { data: historyData, error: historyError } = await supabase
-      .from("math_problem_sessions")
-      .select(
-        `
-            id,
-            created_at,
-            problem_text,
-            submissions:math_problem_submissions (
-                user_answer,
-                is_correct
-            )
-        `
-      )
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    if (historyError) {
-      console.error("Error fetching history:", historyError);
-    } else {
-      setHistory(historyData as ProblemHistory);
-    }
-  }, []);
-
   const formatTopicLabel = useCallback((topic: string) => {
     return topic.replace(/([A-Z])/g, " $1").replace(/\s+/g, " ").trim();
   }, []);
@@ -232,8 +183,7 @@ export default function MathBuddyClient() {
 
   useEffect(() => {
     handlePrimaryLevelChange("Primary5");
-    fetchScoreAndHistory();
-  }, [handlePrimaryLevelChange, fetchScoreAndHistory]);
+  }, [handlePrimaryLevelChange]);
 
   const handleGenerateProblem = async (
     values: z.infer<typeof generationSchema>
@@ -354,7 +304,7 @@ export default function MathBuddyClient() {
       setFeedback({ isCorrect, text: fallbackFeedback });
     } finally {
       setGameState("feedback");
-      fetchScoreAndHistory(); // Update score and history after submission
+      await refreshProgress();
     }
   };
 
@@ -406,6 +356,8 @@ export default function MathBuddyClient() {
     handlePrimaryLevelChange("Primary5");
     answerForm.reset();
   };
+
+  const latestSession = history[0];
 
   const renderContent = () => {
     switch (gameState) {
@@ -820,69 +772,6 @@ export default function MathBuddyClient() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-        <Sheet open={showHistorySheet} onOpenChange={setShowHistorySheet}>
-          <SheetContent className="w-full border-none bg-white/90 backdrop-blur-xl sm:max-w-lg">
-            <SheetHeader className="space-y-2 text-left">
-              <SheetTitle className="font-headline text-2xl text-primary">
-                Adventure Log
-              </SheetTitle>
-              <SheetDescription className="text-base text-muted-foreground">
-                Review your previously attempted problems.
-              </SheetDescription>
-            </SheetHeader>
-            <ScrollArea className="h-[calc(100%-4rem)]">
-              <div className="space-y-4 p-4">
-                {history.length > 0 ? (
-                  history.map((session) => (
-                    <Card
-                      key={session.id}
-                      className="rounded-2xl border border-border/40 bg-white/90 shadow-inner backdrop-blur-sm"
-                    >
-                      <CardHeader className="space-y-1">
-                        <CardDescription className="text-sm text-muted-foreground">
-                          {new Date(session.created_at).toLocaleString()}
-                        </CardDescription>
-                        <CardTitle className="text-base font-semibold text-foreground">
-                          <MathText text={session.problem_text} />
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {session.submissions.length > 0 ? (
-                          <ul className="space-y-2 text-sm">
-                            {session.submissions.map((sub, i) => (
-                              <li key={i} className="flex items-center gap-2">
-                                {sub.is_correct ? (
-                                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                                ) : (
-                                  <XCircle className="h-4 w-4 text-destructive" />
-                                )}
-                                <span className="font-medium">
-                                  Your answer: {sub.user_answer}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            No answer submitted.
-                          </p>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))
-                ) : (
-                  <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-primary/20 bg-white/75 p-8 text-center shadow-inner">
-                    <HelpCircle className="h-10 w-10 text-primary" />
-                    <p className="mt-4 font-semibold text-foreground">No History Yet</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Generate your first problem to start your history.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-          </SheetContent>
-        </Sheet>
         <CardHeader className="relative z-10 space-y-6 px-6 pb-6 pt-10 text-center sm:px-10">
           <motion.div
             className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-primary to-accent text-white shadow-lg"
@@ -971,23 +860,41 @@ export default function MathBuddyClient() {
             >
               <div>
                 <p className="text-xs uppercase tracking-[0.35em] text-muted-foreground">
-                  Adventure log
+                  Latest quest
                 </p>
-                <p className="mt-2 text-xl font-semibold text-primary">
-                  Revisit your puzzles
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  See every problem and answer you've explored.
-                </p>
+                {latestSession ? (
+                  <div className="mt-3 space-y-2">
+                    <div className="text-sm text-muted-foreground">
+                      {new Date(latestSession.created_at).toLocaleDateString()}
+                    </div>
+                    <div className="rounded-xl border border-border/40 bg-white/90 p-3 text-sm font-medium text-foreground shadow-inner">
+                      <MathText text={latestSession.problem_text} />
+                    </div>
+                    <div className="flex items-center gap-2 text-xs font-semibold">
+                      {latestSession.submissions.length > 0 ? (
+                        latestSession.submissions[latestSession.submissions.length - 1]
+                          .is_correct ? (
+                          <span className="rounded-full bg-primary/10 px-3 py-1 text-primary">
+                            Correct on record
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-destructive/10 px-3 py-1 text-destructive">
+                            Needs another try
+                          </span>
+                        )
+                      ) : (
+                        <span className="rounded-full bg-accent/10 px-3 py-1 text-accent">
+                          Awaiting submission
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Your next challenge will appear here once you start solving!
+                  </p>
+                )}
               </div>
-              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Button
-                  onClick={() => setShowHistorySheet(true)}
-                  className="mt-4 w-full rounded-full bg-gradient-to-r from-primary to-accent text-sm font-semibold text-white shadow-lg hover:brightness-105"
-                >
-                  <History className="mr-2 h-4 w-4" /> View history
-                </Button>
-              </motion.div>
             </motion.div>
           </div>
           {renderContent()}
