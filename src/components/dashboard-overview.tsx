@@ -16,7 +16,7 @@ import { useMathProgress } from "@/hooks/use-math-progress";
 import { MathText } from "@/components/math-text";
 
 export function DashboardOverview() {
-  const { score, history, loading } = useMathProgress();
+  const { score, history } = useMathProgress();
 
   const accuracy = useMemo(
     () => (score.total ? Math.round((score.correct / score.total) * 100) : 0),
@@ -58,7 +58,7 @@ export function DashboardOverview() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-2">
         <Card className="rounded-3xl border border-primary/30 bg-primary/10 shadow-inner backdrop-blur">
           <CardHeader>
             <CardTitle className="text-lg font-semibold text-primary">Challenges solved</CardTitle>
@@ -78,50 +78,6 @@ export function DashboardOverview() {
             </CardDescription>
           </CardHeader>
           <CardContent className="text-4xl font-headline text-accent">{streak}</CardContent>
-        </Card>
-        <Card className="rounded-3xl border border-border/50 bg-white/85 shadow-inner backdrop-blur">
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold text-primary">Latest performance</CardTitle>
-            <CardDescription className="text-sm text-muted-foreground">
-              A quick view of your recent submissions.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {loading ? (
-              <div className="space-y-2">
-                {[...Array(3)].map((_, index) => (
-                  <div key={index} className="h-10 animate-pulse rounded-xl bg-muted/40" />
-                ))}
-              </div>
-            ) : recentSessions.length ? (
-              recentSessions.map((session) => {
-                const latest =
-                  session.submissions.length > 0
-                    ? session.submissions[session.submissions.length - 1]
-                    : null;
-                return (
-                  <div
-                    key={session.id}
-                    className="flex items-center justify-between rounded-xl border border-border/40 bg-white/80 px-3 py-2"
-                  >
-                    <span className="text-sm font-medium text-foreground">
-                      {new Date(session.created_at).toLocaleDateString()}
-                    </span>
-                    <Badge
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
-                        latest?.is_correct ? "bg-primary/15 text-primary" : "bg-destructive/10 text-destructive"
-                      }`}
-                      variant="outline"
-                    >
-                      {latest?.is_correct ? "Correct" : "Incorrect"}
-                    </Badge>
-                  </div>
-                );
-              })
-            ) : (
-              <p className="text-sm text-muted-foreground">No activity yet. Start solving challenges to see updates.</p>
-            )}
-          </CardContent>
         </Card>
       </div>
 
